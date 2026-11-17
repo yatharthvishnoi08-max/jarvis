@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>JARVIS - Operating System Interface</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <style>
+    @keyframes pulse-ring {
+      0% { transform: scale(0.95); opacity: 0.8; }
+      50% { transform: scale(1.05); opacity: 0.3; }
+      100% { transform: scale(0.95); opacity: 0.8; }
+    }
+    @keyframes spin-slow {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+    .arc-reactor {
+      box-shadow: 0 0 25px rgba(0, 240, 255, 0.45), inset 0 0 15px rgba(0, 240, 255, 0.4);
+    }
+    .glow-border {
+      box-shadow: 0 0 15px rgba(0, 240, 255, 0.15);
+    }
+    .scrollbar-thin::-webkit-scrollbar {
+      width: 4px;
+    }
+    .scrollbar-thin::-webkit-scrollbar-thumb {
+      background: #1e293b;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body class="bg-[#070B14] text-slate-100 min-h-screen flex flex-col font-sans select-none overflow-hidden">
+
+  <!-- TOP HUD HEADER -->
+  <header class="border-b border-cyan-900/40 bg-[#0B0F19]/90 backdrop-blur-md px-4 py-3 flex items-center justify-between shrink-0">
+    <div class="flex items-center space-x-3">
+      <div class="relative flex items-center justify-center w-8 h-8 rounded-full border border-cyan-400 arc-reactor">
+        <div class="w-2.5 h-2.5 bg-cyan-400 rounded-full animate-ping"></div>
+      </div>
+      <div>
+        <div class="flex items-center space-x-2">
+          <span class="font-extrabold tracking-widest text-cyan-400 text-sm">J.A.R.V.I.S.</span>
+          <span class="text-[10px] uppercase px-1.5 py-0.5 rounded bg-cyan-950 text-cyan-400 border border-cyan-800/60 font-mono">v2.0-OS</span>
+        </div>
+        <div class="text-[10px] text-slate-400 font-mono tracking-tight" id="connection-status">Connecting to Core...</div>
+      </div>
+    </div>
+
+    <!-- Live System Telemetry -->
+    <div class="hidden sm:flex items-center space-x-4 text-xs font-mono text-slate-300">
+      <div class="flex items-center space-x-1.5 bg-slate-900/80 px-2.5 py-1 rounded border border-slate-800">
+        <i data-lucide="cpu" class="w-3.5 h-3.5 text-cyan-400"></i>
+        <span>CPU:</span>
+        <span id="stat-cpu" class="text-cyan-300 font-bold">--%</span>
+      </div>
+      <div class="flex items-center space-x-1.5 bg-slate-900/80 px-2.5 py-1 rounded border border-slate-800">
+        <i data-lucide="activity" class="w-3.5 h-3.5 text-cyan-400"></i>
+        <span>RAM:</span>
+        <span id="stat-ram" class="text-cyan-300 font-bold">--%</span>
+      </div>
+    </div>
+
+    <!-- Voice and Drawer Toggles -->
+    <div class="flex items-center space-x-2">
+      <button id="toggle-voice-btn" class="p-2 rounded-lg bg-slate-900 border border-slate-800 text-cyan-400 hover:bg-cyan-950/40 transition flex items-center space-x-1 text-xs">
+        <i data-lucide="volume-2" id="voice-icon" class="w-4 h-4"></i>
+        <span class="hidden md:inline text-[11px] font-mono">Voice ON</span>
+      </button>
+      <button id="toggle-team-btn" class="p-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 hover:text-cyan-400 hover:bg-slate-800 transition text-xs flex items-center space-x-1">
+        <i data-lucide="users" class="w-4 h-4"></i>
+        <span class="hidden md:inline text-[11px] font-mono">Employees</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- MAIN VIEWPORT -->
+  <div class="flex-1 flex overflow-hidden relative">
+
+    <!-- CHAT CONTAINER -->
+    <div class="flex-1 flex flex-col h-full overflow-hidden">
+      
+      <!-- TOOL HUD TOAST DRAWER -->
+      <div id="tool-banner" class="hidden px-4 py-2 bg-cyan-950/30 border-b border-cyan-800/40 text-xs font-mono flex items-center space-x-2 text-cyan-300">
+        <span class="relative flex h-2 w-2">
+          <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
+          <span class="relative inline-flex rounded-full h-2 w-2 bg-cyan-500"></span>
+        </span>
+        <span id="tool-banner-text">Running system operation...</span>
+      </div>
+
+      <!-- MESSAGES SCROLL AREA -->
+      <div id="messages-container" class="flex-1 overflow-y-auto px-4 py-6 space-y-4 scrollbar-thin">
+        
+        <!-- Welcome Card -->
+        <div class="max-w-xl mx-auto p-4 rounded-xl bg-slate-900/60 border border-cyan-900/30 text-center space-y-2">
+          <div class="inline-flex p-3 rounded-full bg-cyan-950/60 border border-cyan-500/30 arc-reactor text-cyan-400 mb-1">
+            <i data-lucide="bot" class="w-6 h-6"></i>
+          </div>
+          <h2 class="text-sm font-semibold text-cyan-300 tracking-wider uppercase">J.A.R.V.I.S. Core Interface Ready</h2>
+          <p class="text-xs text-slate-400">
+            Connected to your laptop. Tap the microphone to speak hands-free, or type commands below.
+          </p>
+          <div class="flex flex-wrap justify-center gap-1.5 pt-2 text-[11px] font-mono">
+            <button onclick="sendQuickPrompt('Check my laptop system stats and memory.')" class="px-2.5 py-1 rounded bg-slate-800/80 hover:bg-cyan-900/40 border border-slate-700/60 text-slate-300 hover:text-cyan-300 transition">
+              ⚡ System Stats
+            </button>
+            <button onclick="sendQuickPrompt('List the 5 most recent files in my Downloads folder.')" class="px-2.5 py-1 rounded bg-slate-800/80 hover:bg-cyan-900/40 border border-slate-700/60 text-slate-300 hover:text-cyan-300 transition">
+              📂 Downloads
+            </button>
+            <button onclick="sendQuickPrompt('What are your active employee agents and their guidelines?')" class="px-2.5 py-1 rounded bg-slate-800/80 hover:bg-cyan-900/40 border border-slate-700/60 text-slate-300 hover:text-cyan-300 transition">
+              👥 Team Roster
+            </button>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- INPUT BAR -->
+      <div class="p-3 bg-[#0B0F19]/90 border-t border-slate-800/80 backdrop-blur-md">
+        <form id="chat-form" class="max-w-3xl mx-auto flex items-center space-x-2">
+          
+          <!-- Mic / Voice Input Button -->
+          <button type="button" id="mic-btn" class="p-3 rounded-full bg-slate-900 border border-cyan-500/40 text-cyan-400 hover:bg-cyan-950/60 active:scale-95 transition flex items-center justify-center shrink-0 shadow-lg" title="Tap to Speak">
+            <i data-lucide="mic" id="mic-icon" class="w-5 h-5"></i>
+          </button>
+
+          <!-- Text Field -->
+          <div class="flex-1 relative">
+            <input 
+              type="text" 
+              id="user-input" 
+              placeholder="Ask JARVIS, give a system command, or coach an employee..." 
+              autocomplete="off"
+              class="w-full bg-slate-900/90 border border-slate-800 rounded-full px-4 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500/70 transition"
+            >
+          </div>
+
+          <!-- Send Button -->
+          <button type="submit" id="send-btn" class="p-2.5 rounded-full bg-cyan-500 text-slate-950 hover:bg-cyan-400 active:scale-95 transition flex items-center justify-center shrink-0">
+            <i data-lucide="send" class="w-4 h-4"></i>
+          </button>
+        </form>
+      </div>
+
+    </div>
+
+    <!-- SIDEBAR: TEAM & MEMORY DRAWER -->
+    <div id="team-drawer" class="hidden absolute top-0 right-0 w-80 h-full bg-[#0B0F19] border-l border-slate-800 flex flex-col z-20 shadow-2xl transition-all">
+      <div class="p-4 border-b border-slate-800 flex items-center justify-between">
+        <div class="flex items-center space-x-2">
+          <i data-lucide="users" class="w-4 h-4 text-cyan-400"></i>
+          <span class="font-semibold text-xs tracking-wider uppercase text-cyan-300">Employees & Memory</span>
+        </div>
+        <button id="close-team-btn" class="text-slate-400 hover:text-white">
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+      </div>
+      <div class="p-4 flex-1 overflow-y-auto space-y-4 text-xs font-mono scrollbar-thin">
+        <div>
+          <h3 class="text-slate-400 uppercase text-[10px] font-bold tracking-wider mb-2">Active Employees</h3>
+          <div id="employee-list" class="space-y-2">
+            <div class="p-2 rounded bg-slate-900 border border-slate-800 text-slate-300">Loading employees...</div>
+          </div>
+        </div>
+        <div class="pt-2 border-t border-slate-800">
+          <h3 class="text-slate-400 uppercase text-[10px] font-bold tracking-wider mb-2">Learned Rules & Memory</h3>
+          <div id="memory-content" class="p-2.5 rounded bg-slate-900 border border-slate-800 text-slate-300 text-[11px] whitespace-pre-wrap leading-relaxed max-h-48 overflow-y-auto">Loading memory...</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Hidden HTML5 Audio Element for ElevenLabs stream playback -->
+  <audio id="audio-player" class="hidden"></audio>
+
+  <script>
+    // Lucide icons
+    lucide.createIcons();
+
+    // Elements
+    const messagesContainer = document.getElementById('messages-container');
+    const chatForm = document.getElementById('chat-form');
+    const userInput = document.getElementById('user-input');
+    const micBtn = document.getElementById('mic-btn');
+    const micIcon = document.getElementById('mic-icon');
+    const toolBanner = document.getElementById('tool-banner');
+    const toolBannerText = document.getElementById('tool-banner-text');
+    const connectionStatus = document.getElementById('connection-status');
+    const toggleVoiceBtn = document.getElementById('toggle-voice-btn');
+    const voiceIcon = document.getElementById('voice-icon');
+    const toggleTeamBtn = document.getElementById('toggle-team-btn');
+    const closeTeamBtn = document.getElementById('close-team-btn');
+    const teamDrawer = document.getElementById('team-drawer');
+    const audioPlayer = document.getElementById('audio-player');
+
+    let voiceEnabled = true;
+    let ws = null;
+    let isListening = false;
+    let recognition = null;
+
+    // Connect WebSocket
+    function connectWS() {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${protocol}//${window.location.host}/ws`;
+      
+      ws = new WebSocket(wsUrl);
+
+      ws.onopen = () => {
+        connectionStatus.textContent = 'CONNECTED (LAN ONLINE)';
+        connectionStatus.className = 'text-[10px] text-emerald-400 font-mono tracking-tight';
+      };
+
+      ws.onclose = () => {
+        connectionStatus.textContent = 'DISCONNECTED (Reconnecting...)';
+        connectionStatus.className = 'text-[10px] text-amber-400 font-mono tracking-tight';
+        setTimeout(connectWS, 2000);
+      };
+
+      ws.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+
+        if (data.type === 'tool_start') {
+          toolBanner.classList.remove('hidden');
+          toolBannerText.textContent = `⚡ Executing: ${data.tool}(${JSON.stringify(data.args)})`;
+        } 
+        else if (data.type === 'tool_end') {
+          toolBanner.classList.add('hidden');
+        } 
+        else if (data.type === 'response') {
+          toolBanner.classList.add('hidden');
+          appendMessage('jarvis', data.text);
+          if (voiceEnabled && data.audio_url) {
+            playAudio(data.audio_url);
+          }
+        } 
+        else if (data.type === 'stats') {
+          document.getElementById('stat-cpu').textContent = data.cpu + '%';
+          document.getElementById('stat-ram').textContent = data.ram + '%';
+        }
+      };
+    }
+
+    connectWS();
+
+    // Poll live telemetry
+    setInterval(() => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'get_stats' }));
+      }
+    }, 4000);
+
+    // Audio Playback
+    function playAudio(url) {
+      audioPlayer.src = url + '?t=' + Date.now();
+      audioPlayer.play().catch(err => {
+        console.log("Audio autoplay prevented by browser. Click interface to allow audio.", err);
+      });
+    }
+
+    // Append Message to UI
+    function appendMessage(sender, text) {
+      const div = document.createElement('div');
+      const isUser = sender === 'user';
+      div.className = `flex ${isUser ? 'justify-end' : 'justify-start'} w-full animate-fade-in`;
+
+      const bubble = document.createElement('div');
+      bubble.className = `max-w-[85%] sm:max-w-2xl px-4 py-3 rounded-2xl text-sm leading-relaxed ${
+        isUser 
+          ? 'bg-cyan-600/30 border border-cyan-500/40 text-cyan-100 rounded-br-sm' 
+          : 'bg-slate-900/90 border border-slate-800 text-slate-200 rounded-bl-sm glow-border'
+      }`;
+
+      if (isUser) {
+        bubble.textContent = text;
+      } else {
+        bubble.innerHTML = marked.parse(text);
+      }
+
+      div.appendChild(bubble);
+      messagesContainer.appendChild(div);
+      messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }
+
+    // Form Submit
+    chatForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const text = userInput.value.trim();
+      if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
+
+      appendMessage('user', text);
+      userInput.value = '';
+
+      ws.send(JSON.stringify({ type: 'chat', text: text, voice: voiceEnabled }));
+    });
+
+    window.sendQuickPrompt = (prompt) => {
+      userInput.value = prompt;
+      chatForm.dispatchEvent(new Event('submit'));
+    };
+
+    // Voice Toggle
+    toggleVoiceBtn.addEventListener('click', () => {
+      voiceEnabled = !voiceEnabled;
+      toggleVoiceBtn.className = voiceEnabled 
+        ? 'p-2 rounded-lg bg-slate-900 border border-slate-800 text-cyan-400 hover:bg-cyan-950/40 transition flex items-center space-x-1 text-xs'
+        : 'p-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-500 hover:bg-slate-800 transition flex items-center space-x-1 text-xs';
+      toggleVoiceBtn.querySelector('span').textContent = voiceEnabled ? 'Voice ON' : 'Voice OFF';
+    });
+
+    // Web Speech Recognition (Browser Microphone for Phone / Remote Device)
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    if (SpeechRecognition) {
+      recognition = new SpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = false;
+      recognition.lang = 'en-US';
+
+      recognition.onstart = () => {
+        isListening = true;
+        micBtn.classList.add('bg-red-950', 'border-red-500', 'text-red-400');
+        micBtn.classList.remove('bg-slate-900', 'border-cyan-500/40', 'text-cyan-400');
+        userInput.placeholder = "Listening... Speak now.";
+      };
+
+      recognition.onresult = (event) => {
+        const transcript = event.results[0][0].transcript;
+        userInput.value = transcript;
+        chatForm.dispatchEvent(new Event('submit'));
+      };
+
+      recognition.onerror = (event) => {
+        console.error("Speech Recognition Error:", event.error);
+        stopListening();
+      };
+
+      recognition.onend = () => {
+        stopListening();
+      };
+
+      function stopListening() {
+        isListening = false;
+        micBtn.classList.remove('bg-red-950', 'border-red-500', 'text-red-400');
+        micBtn.classList.add('bg-slate-900', 'border-cyan-500/40', 'text-cyan-400');
+        userInput.placeholder = "Ask JARVIS, give a system command, or coach an employee...";
+      }
+
+      micBtn.addEventListener('click', () => {
+        if (!isListening) {
+          recognition.start();
+        } else {
+          recognition.stop();
+        }
+      });
+    } else {
+      micBtn.title = "Speech recognition not supported in this browser. Use Chrome/Safari.";
+    }
+
+    // Team Drawer
+    toggleTeamBtn.addEventListener('click', () => {
+      teamDrawer.classList.toggle('hidden');
+      if (!teamDrawer.classList.contains('hidden')) {
+        fetchTeamAndMemory();
+      }
+    });
+
+    closeTeamBtn.addEventListener('click', () => {
+      teamDrawer.classList.add('hidden');
+    });
+
+    function fetchTeamAndMemory() {
+      fetch('/api/team')
+        .then(r => r.json())
+        .then(data => {
+          const container = document.getElementById('employee-list');
+          container.innerHTML = '';
+          data.employees.forEach(emp => {
+            const card = document.createElement('div');
+            card.className = 'p-2 rounded bg-slate-900 border border-slate-800 text-slate-300';
+            card.innerHTML = `<span class="text-cyan-400 font-bold">${emp.name}</span>: ${emp.description}`;
+            container.appendChild(card);
+          });
+        });
+
+      fetch('/api/memory')
+        .then(r => r.json())
+        .then(data => {
+          document.getElementById('memory-content').textContent = data.memory;
+        });
+    }
+  </script>
+</body>
+</html>
