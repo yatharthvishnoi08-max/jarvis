@@ -10,8 +10,21 @@ interface AuthState {
   checkAuth: () => Promise<boolean>;
 }
 
+const getInitialToken = () => {
+  if (typeof window !== 'undefined') {
+    const urlParam = new URLSearchParams(window.location.search).get('token');
+    if (urlParam) {
+      localStorage.setItem('jarvis_auth_token', urlParam.trim());
+      // Clean query string from browser address bar
+      window.history.replaceState({}, document.title, window.location.pathname);
+      return urlParam.trim();
+    }
+  }
+  return typeof localStorage !== 'undefined' ? localStorage.getItem('jarvis_auth_token') || '' : '';
+};
+
 export const useAuthStore = create<AuthState>((set, get) => ({
-  token: localStorage.getItem('jarvis_auth_token') || '',
+  token: getInitialToken(),
   isAuthenticated: false,
   isLoading: true,
   error: null,
