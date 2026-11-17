@@ -13,6 +13,8 @@ interface JarvisState {
   currentThought: string | null;
   pendingApprovals: ApprovalRequest[];
   ws: WebSocket | null;
+  connectionError: string | null;
+  reconnectAttempt: number;
   voiceEnabled: boolean;
   isEmergencyStopped: boolean;
   isListening: boolean;
@@ -22,6 +24,7 @@ interface JarvisState {
   setVoiceEnabled: (enabled: boolean) => void;
   setIsListening: (listening: boolean) => void;
   connectWebSocket: () => void;
+  retryConnection: () => void;
   disconnectWebSocket: () => void;
   loadSessions: () => Promise<void>;
   createSession: (title?: string) => Promise<string>;
@@ -46,6 +49,8 @@ export const useJarvisStore = create<JarvisState>((set, get) => {
     currentThought: null,
     pendingApprovals: [],
     ws: null,
+    connectionError: null,
+    reconnectAttempt: 0,
     voiceEnabled: true,
     isEmergencyStopped: false,
     isListening: false,
@@ -68,7 +73,11 @@ export const useJarvisStore = create<JarvisState>((set, get) => {
         return;
       }
 
-      if (get().ws && get().ws?.readyState === WebSocket.OPEN) {
+      const existingSocket = get().ws;
+      if (
+        existingSocket &&
+        (existingSocket.readyState === WebSocket.CONNECTING || existingSocket.readyState === WebSocket.OPEN)
+      ) {
         return;
       }
 
@@ -76,26 +85,51 @@ export const useJarvisStore = create<JarvisState>((set, get) => {
       const wsUrl = `${protocol}//${window.location.host}/ws?token=${encodeURIComponent(token)}`;
 
       const socket = new WebSocket(wsUrl);
+      set({ ws: socket, connectionError: null });
 
       socket.onopen = () => {
-        set({ ws: socket, orbState: 'idle', isEmergencyStopped: false });
+        set({
+          ws: socket,
+          orbState: 'idle',
+          isEmergencyStopped: false,
+          connectionError: null,
+          reconnectAttempt: 0
+        });
         if (reconnectTimer) clearTimeout(reconnectTimer);
         get().loadSessions();
         get().fetchPendingApprovals();
       };
 
-      socket.onclose = () => {
-        set({ ws: null, orbState: 'disconnected' });
+      socket.onclose = (event) => {
+        // Ignore a stale socket closed by cleanup or a newer connection.
+        if (get().ws !== socket) return;
+
+        const attempt = get().reconnectAttempt + 1;
+        const message = event.code === 1008
+          ? 'Connection rejected. Check the owner token.'
+          : event.code === 1011
+            ? 'The JARVIS core reported an internal error.'
+            : 'Realtime link unavailable. The gateway may be missing WebSocket support.';
+        set({
+          ws: null,
+          orbState: 'disconnected',
+          connectionError: message,
+          reconnectAttempt: attempt
+        });
+        const delay = Math.min(15000, 1500 * 2 ** Math.min(attempt - 1, 3));
         reconnectTimer = setTimeout(() => {
           if (useAuthStore.getState().isAuthenticated) {
             get().connectWebSocket();
           }
-        }, 3000);
+        }, delay);
       };
 
       socket.onerror = (err) => {
         console.error('WebSocket connection error:', err);
-        set({ orbState: 'error' });
+        set({
+          orbState: 'error',
+          connectionError: 'Unable to establish the realtime link to JARVIS.'
+        });
       };
 
       socket.onmessage = (event) => {
@@ -172,6 +206,15 @@ export const useJarvisStore = create<JarvisState>((set, get) => {
               });
               break;
 
+            case 'error':
+              set({
+                orbState: 'error',
+                currentTool: null,
+                currentThought: null,
+                connectionError: data.message || 'JARVIS encountered an unexpected error.'
+              });
+              break;
+
             default:
               break;
           }
@@ -182,11 +225,26 @@ export const useJarvisStore = create<JarvisState>((set, get) => {
     },
 
     disconnectWebSocket: () => {
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
       const socket = get().ws;
+      set({ ws: null, orbState: 'disconnected' });
       if (socket) {
         socket.close();
       }
-      set({ ws: null, orbState: 'disconnected' });
+    },
+
+    retryConnection: () => {
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
+      const socket = get().ws;
+      set({ ws: null, orbState: 'disconnected', connectionError: null, reconnectAttempt: 0 });
+      if (socket) socket.close();
+      get().connectWebSocket();
     },
 
     loadSessions: async () => {

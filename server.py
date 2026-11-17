@@ -125,7 +125,10 @@ async def get_telemetry(auth: bool = Depends(authenticate_request)):
     ips = get_lan_and_tailscale_ips()
     cpu = psutil.cpu_percent(interval=None)
     ram = psutil.virtual_memory()
-    disk = psutil.disk_usage("C:\\")
+    # Use the host's system volume on Windows, macOS, Linux, or a future
+    # container deployment instead of assuming the gateway always runs on C:.
+    disk_root = Path.home().anchor or os.path.abspath(os.sep)
+    disk = psutil.disk_usage(disk_root)
 
     return {
         "cpu_percent": cpu,
@@ -259,21 +262,12 @@ async def get_audio(audio_id: str):
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    # Verify auth token via query param
+    # Verify auth token before accepting the socket. A rejected handshake is
+    # clearer to clients and avoids accidentally accepting the same socket twice.
     token = websocket.query_params.get("token")
     if not token or not verify_token(token):
-        await websocket.accept()
-        # Allow one chance to send auth message
-        try:
-            auth_msg_raw = await asyncio.wait_for(websocket.receive_text(), timeout=5.0)
-            auth_data = json.loads(auth_msg_raw)
-            if auth_data.get("type") != "auth" or not verify_token(auth_data.get("token")):
-                await websocket.send_json({"type": "error", "message": "Unauthorized WebSocket connection."})
-                await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-                return
-        except Exception:
-            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-            return
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Unauthorized")
+        return
 
     await websocket.accept()
     loop = asyncio.get_event_loop()
@@ -393,7 +387,16 @@ async def websocket_endpoint(websocket: WebSocket):
     except WebSocketDisconnect:
         pass
     except Exception as e:
-        print(f"[WebSocket Error]: {e}")
+        safe_error = redact_secrets(str(e))
+        print(f"[WebSocket Error]: {safe_error}")
+        try:
+            await websocket.send_json({
+                "type": "error",
+                "message": "JARVIS hit an internal error. Check the gateway console for details."
+            })
+            await websocket.close(code=1011, reason="Internal server error")
+        except Exception:
+            pass
 
 # ----------------- STATIC PWA SERVING -----------------
 
@@ -416,6 +419,12 @@ async def serve_pwa(full_path: str):
 
 if __name__ == "__main__":
     import uvicorn
+    try:
+        import websockets  # noqa: F401
+    except ImportError as exc:
+        raise SystemExit(
+            "Missing WebSocket runtime. Run: python -m pip install -r requirements.txt"
+        ) from exc
     ips = get_lan_and_tailscale_ips()
     primary_lan = ips["lan"][0] if ips["lan"] else "localhost"
     primary_ts = ips["tailscale"][0] if ips["tailscale"] else None
@@ -429,4 +438,6 @@ if __name__ == "__main__":
         print(f"🔒 Tailscale Access: http://{primary_ts}:8000")
     print("="*68 + "\n")
 
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    # Pin the protocol implementation so a broken environment fails loudly
+    # instead of serving HTTP while silently routing /ws to the PWA fallback.
+    uvicorn.run(app, host="0.0.0.0", port=8000, ws="websockets")

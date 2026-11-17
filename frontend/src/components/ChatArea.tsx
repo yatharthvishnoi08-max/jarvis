@@ -4,6 +4,7 @@ import { useAudioStore } from '../stores/useAudioStore';
 import { JarvisOrb } from './JarvisOrb';
 import { Play, Square, Bot, User, Wrench, Sparkles } from 'lucide-react';
 import { marked } from 'marked';
+import DOMPurify from 'dompurify';
 
 export const ChatArea: React.FC = () => {
   const { messages, orbState, currentTool, currentThought, sendMessage } = useJarvisStore();
@@ -16,11 +17,13 @@ export const ChatArea: React.FC = () => {
 
   const renderMarkdown = (content: string) => {
     try {
-      return { __html: marked.parse(content) as string };
+      return { __html: DOMPurify.sanitize(marked.parse(content) as string) };
     } catch {
-      return { __html: content };
+      return { __html: DOMPurify.sanitize(content) };
     }
   };
+
+  const isConnected = orbState !== 'disconnected' && orbState !== 'error';
 
   return (
     <div className="flex-1 overflow-y-auto px-3 sm:px-6 py-6 space-y-5">
@@ -31,10 +34,14 @@ export const ChatArea: React.FC = () => {
 
           <div className="space-y-2">
             <h1 className="text-xl sm:text-2xl font-bold tracking-wider text-cyan-300 hud-title uppercase">
-              J.A.R.V.I.S. Core Online
+              {orbState === 'disconnected' || orbState === 'error'
+                ? 'J.A.R.V.I.S. Link Offline'
+                : 'J.A.R.V.I.S. Core Online'}
             </h1>
             <p className="text-xs sm:text-sm text-slate-400 max-w-md mx-auto leading-relaxed">
-              Autonomous Operating System Controller v3. Speak hands-free, control Windows applications, or orchestrate specialist agents.
+              {orbState === 'disconnected' || orbState === 'error'
+                ? 'The interface loaded, but the realtime command channel is unavailable. Reconnect below to continue.'
+                : 'One secure command surface for conversations, Windows actions, voice, and specialist agents.'}
             </p>
           </div>
 
@@ -42,7 +49,8 @@ export const ChatArea: React.FC = () => {
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 w-full pt-2">
             <button
               onClick={() => sendMessage('Check my laptop system telemetry and available memory.')}
-              className="p-3 rounded-xl bg-obsidian-850 hover:bg-cyan-950/40 border border-slate-800 hover:border-cyan-500/40 text-left transition group"
+              disabled={!isConnected}
+              className="p-3 rounded-xl bg-obsidian-850 hover:bg-cyan-950/40 border border-slate-800 hover:border-cyan-500/40 text-left transition group disabled:opacity-40 disabled:pointer-events-none"
             >
               <div className="text-xs font-semibold text-cyan-400 group-hover:text-cyan-300 flex items-center space-x-1.5 font-mono">
                 <Sparkles className="w-3.5 h-3.5" />
@@ -53,7 +61,8 @@ export const ChatArea: React.FC = () => {
 
             <button
               onClick={() => sendMessage('List the 5 most recent files in my Downloads folder.')}
-              className="p-3 rounded-xl bg-obsidian-850 hover:bg-cyan-950/40 border border-slate-800 hover:border-cyan-500/40 text-left transition group"
+              disabled={!isConnected}
+              className="p-3 rounded-xl bg-obsidian-850 hover:bg-cyan-950/40 border border-slate-800 hover:border-cyan-500/40 text-left transition group disabled:opacity-40 disabled:pointer-events-none"
             >
               <div className="text-xs font-semibold text-cyan-400 group-hover:text-cyan-300 flex items-center space-x-1.5 font-mono">
                 <Wrench className="w-3.5 h-3.5" />
@@ -64,7 +73,8 @@ export const ChatArea: React.FC = () => {
 
             <button
               onClick={() => sendMessage('What is the current team roster and operational rules?')}
-              className="p-3 rounded-xl bg-obsidian-850 hover:bg-cyan-950/40 border border-slate-800 hover:border-cyan-500/40 text-left transition group"
+              disabled={!isConnected}
+              className="p-3 rounded-xl bg-obsidian-850 hover:bg-cyan-950/40 border border-slate-800 hover:border-cyan-500/40 text-left transition group disabled:opacity-40 disabled:pointer-events-none"
             >
               <div className="text-xs font-semibold text-cyan-400 group-hover:text-cyan-300 flex items-center space-x-1.5 font-mono">
                 <Bot className="w-3.5 h-3.5" />
