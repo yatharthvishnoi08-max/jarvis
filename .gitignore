@@ -22,3 +22,14 @@ audio_cache/
 Thumbs.db
 .vscode/
 .idea/
+.pytest_cache/
+
+# Frontend build & dependencies
+frontend/node_modules/
+frontend/dist/
+web_dist/
+
+# Runtime session data & audit logs
+memory/sessions/*.json
+memory/audit.jsonl
+

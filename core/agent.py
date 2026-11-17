@@ -1,10 +1,21 @@
 import json
+import time
+import asyncio
 from pathlib import Path
-from rich.console import Console
-from rich.panel import Panel
-from rich.markdown import Markdown
+from typing import Optional, Callable, Dict, Any, List
 
 from core.client import get_client
+from core.auth import redact_secrets
+from core.audit import audit_logger
+from core.approvals import (
+    classify_tool_call,
+    approval_manager,
+    POLICY_READ,
+    POLICY_CONFIRM,
+    POLICY_CRITICAL,
+    POLICY_BLOCKED,
+)
+from core.session import Session, session_manager
 from tools.system_tools import (
     execute_powershell,
     read_file,
@@ -20,10 +31,8 @@ from tools.meta_tools import (
     read_memory,
 )
 
-console = Console()
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# Tool mapping registry
 TOOL_FUNCTIONS = {
     "execute_powershell": execute_powershell,
     "read_file": read_file,
@@ -118,7 +127,7 @@ TOOL_SCHEMAS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "employee_name": {"type": "string", "description": "Name of the employee (e.g. 'os_operator', 'coder', 'reviewer')."}
+                    "employee_name": {"type": "string", "description": "Name of the employee."}
                 },
                 "required": ["employee_name"]
             }
@@ -167,103 +176,237 @@ TOOL_SCHEMAS = [
 class JarvisAgent:
     def __init__(self):
         self.client, self.model_name = get_client()
-        self.system_prompt = self._build_system_prompt()
-        self.messages = [{"role": "system", "content": self.system_prompt}]
 
-    def _build_system_prompt(self) -> str:
-        prompt_file = BASE_DIR / "agents" / "central_brain.md"
+    def build_system_prompt(self) -> str:
+        prompt_file = BASE_DIR / "SOUL.md"
+        if not prompt_file.exists():
+            prompt_file = BASE_DIR / "agents" / "central_brain.md"
         base_prompt = prompt_file.read_text(encoding="utf-8") if prompt_file.exists() else "You are JARVIS."
-        
-        # Inject employee summary and memory dynamically
+
         employees_info = list_employees()
         memory_info = read_memory()
-        
-        full_prompt = (
+
+        return (
             f"{base_prompt}\n\n"
             f"## Current Team Roster:\n{employees_info}\n\n"
             f"## Persistent System Memory:\n{memory_info}\n"
         )
-        return full_prompt
 
-    def chat(self, user_input: str, on_tool_start=None, on_tool_end=None) -> str:
-        """Processes a user input through the Hermes ReAct loop."""
-        self.messages.append({"role": "user", "content": user_input})
-        
-        max_turns = 8
+    async def chat_async(
+        self,
+        session: Session,
+        user_input: str,
+        on_thought: Optional[Callable[[str], None]] = None,
+        on_tool_start: Optional[Callable[[str, Dict[str, Any]], None]] = None,
+        on_tool_end: Optional[Callable[[str, str], None]] = None,
+        on_approval_needed: Optional[Callable[[Dict[str, Any]], None]] = None
+    ) -> str:
+        """
+        Asynchronous ReAct loop with:
+        - Per-session message isolation
+        - Emergency stop check
+        - Strict tool policy checks (READ, CONFIRM, CRITICAL, BLOCKED)
+        - Asynchronous user approval gates
+        - Audit trail logging
+        """
+        session.reset_cancellation()
+        session.add_message(role="user", content=user_input)
+
+        # Assemble conversation history for the LLM
+        messages = [{"role": "system", "content": self.build_system_prompt()}]
+        for m in session.messages:
+            msg_obj = {"role": m["role"], "content": m["content"]}
+            if m.get("tool_calls"):
+                msg_obj["tool_calls"] = m["tool_calls"]
+            if m.get("tool_call_id"):
+                msg_obj["tool_call_id"] = m["tool_call_id"]
+            messages.append(msg_obj)
+
+        max_turns = 10
+        loop = asyncio.get_event_loop()
+
         for turn in range(max_turns):
-            response = self.client.chat.completions.create(
-                model=self.model_name,
-                messages=self.messages,
-                tools=TOOL_SCHEMAS,
-                tool_choice="auto",
-                temperature=0.3
-            )
-            
+            if session.is_cancelled:
+                msg = "[EMERGENCY STOP] Operation cancelled by user."
+                session.add_message(role="assistant", content=msg)
+                return msg
+
+            # Run LLM completion in thread to prevent blocking the event loop
+            try:
+                response = await loop.run_in_executor(
+                    None,
+                    lambda: self.client.chat.completions.create(
+                        model=self.model_name,
+                        messages=messages,
+                        tools=TOOL_SCHEMAS,
+                        tool_choice="auto",
+                        temperature=0.3
+                    )
+                )
+            except Exception as e:
+                err_text = f"LLM Inference Error: {str(e)}"
+                session.add_message(role="assistant", content=err_text)
+                return err_text
+
+            if session.is_cancelled:
+                msg = "[EMERGENCY STOP] Operation cancelled by user."
+                session.add_message(role="assistant", content=msg)
+                return msg
+
             message = response.choices[0].message
-            
-            # If the model has text response, save it to history
-            if message.content:
-                self.messages.append({"role": "assistant", "content": message.content})
-            
-            # If no tool calls, we're done
+
+            # If no tool calls, this is the final answer
             if not message.tool_calls:
-                return message.content or ""
-            
-            # If tool calls are requested
-            self.messages.append({
-                "role": "assistant",
-                "content": message.content or "",
-                "tool_calls": [
-                    {
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {
-                            "name": tc.function.name,
-                            "arguments": tc.function.arguments
-                        }
+                final_content = redact_secrets(message.content or "")
+                session.add_message(role="assistant", content=final_content)
+                return final_content
+
+            # Format tool calls
+            formatted_tool_calls = [
+                {
+                    "id": tc.id,
+                    "type": "function",
+                    "function": {
+                        "name": tc.function.name,
+                        "arguments": tc.function.arguments
                     }
-                    for tc in message.tool_calls
-                ]
+                }
+                for tc in message.tool_calls
+            ]
+
+            assistant_content = redact_secrets(message.content or "")
+            if on_thought and assistant_content:
+                on_thought(assistant_content)
+
+            session.add_message(
+                role="assistant",
+                content=assistant_content,
+                tool_calls=formatted_tool_calls
+            )
+            messages.append({
+                "role": "assistant",
+                "content": assistant_content,
+                "tool_calls": formatted_tool_calls
             })
-            
-            # Execute each tool call
+
+            # Execute tool calls with policy check
             for tc in message.tool_calls:
+                if session.is_cancelled:
+                    msg = "[EMERGENCY STOP] Operation cancelled by user."
+                    session.add_message(role="assistant", content=msg)
+                    return msg
+
                 fn_name = tc.function.name
-                fn = TOOL_FUNCTIONS.get(fn_name)
-                
                 try:
                     args = json.loads(tc.function.arguments) if tc.function.arguments else {}
                 except Exception:
                     args = {}
                 if not isinstance(args, dict):
                     args = {}
-                
-                console.print(f"[bold cyan]⚡ Tool Execution:[/bold cyan] [yellow]{fn_name}[/yellow] with args: {args}")
+
+                # 1. Evaluate tool policy
+                policy_level, policy_reason = classify_tool_call(fn_name, args)
+
+                audit_logger.log_event(
+                    event_type="TOOL_ATTEMPT",
+                    session_id=session.id,
+                    tool=fn_name,
+                    args=args,
+                    policy=policy_level,
+                    status="ATTEMPT",
+                    detail=policy_reason
+                )
+
+                # 2. Check BLOCKED
+                if policy_level == POLICY_BLOCKED:
+                    blocked_result = f"SECURITY POLICY BLOCK: Operation '{fn_name}' was blocked. Reason: {policy_reason}"
+                    audit_logger.log_event(
+                        event_type="TOOL_BLOCKED",
+                        session_id=session.id,
+                        tool=fn_name,
+                        args=args,
+                        policy=policy_level,
+                        status="BLOCKED",
+                        detail=policy_reason
+                    )
+                    session.add_message(role="tool", content=blocked_result, tool_call_id=tc.id)
+                    messages.append({"role": "tool", "tool_call_id": tc.id, "content": blocked_result})
+                    continue
+
+                # 3. Check CONFIRM or CRITICAL (requires approval)
+                if policy_level in [POLICY_CONFIRM, POLICY_CRITICAL]:
+                    # Create approval request
+                    summary = f"Tool: {fn_name}\nPolicy: {policy_level}\nReason: {policy_reason}"
+                    req = approval_manager.create_request(
+                        session_id=session.id,
+                        tool=fn_name,
+                        args=args,
+                        policy_level=policy_level,
+                        summary=summary
+                    )
+
+                    if on_approval_needed:
+                        on_approval_needed(req.to_dict())
+
+                    # Wait for user approval
+                    await req.event.wait()
+
+                    if session.is_cancelled:
+                        return "[EMERGENCY STOP] Operation cancelled by user."
+
+                    if req.status != "APPROVED":
+                        reject_msg = f"Operation '{fn_name}' rejected by user or expired."
+                        session.add_message(role="tool", content=reject_msg, tool_call_id=tc.id)
+                        messages.append({"role": "tool", "tool_call_id": tc.id, "content": reject_msg})
+                        continue
+
+                # 4. Execute tool
                 if on_tool_start:
-                    try:
-                        on_tool_start(fn_name, args)
-                    except Exception:
-                        pass
-                
+                    on_tool_start(fn_name, args)
+
+                start_time = time.time()
+                fn = TOOL_FUNCTIONS.get(fn_name)
                 if fn:
                     try:
-                        result = fn(**args)
+                        raw_result = await loop.run_in_executor(None, lambda: fn(**args))
                     except Exception as err:
-                        result = f"ERROR executing {fn_name}: {str(err)}"
+                        raw_result = f"ERROR executing {fn_name}: {str(err)}"
                 else:
-                    result = f"ERROR: Tool '{fn_name}' not found."
-                
-                console.print(f"[dim]Output: {str(result)[:150]}...[/dim]")
-                if on_tool_end:
-                    try:
-                        on_tool_end(fn_name, result)
-                    except Exception:
-                        pass
-                
-                self.messages.append({
-                    "role": "tool",
-                    "tool_call_id": tc.id,
-                    "content": str(result)
-                })
+                    raw_result = f"ERROR: Tool '{fn_name}' not found."
 
-        return "I have completed the operations as requested."
+                duration_ms = int((time.time() - start_time) * 1000)
+                clean_result = redact_secrets(str(raw_result))
+
+                audit_logger.log_event(
+                    event_type="TOOL_EXECUTED",
+                    session_id=session.id,
+                    tool=fn_name,
+                    args=args,
+                    policy=policy_level,
+                    status="SUCCESS",
+                    detail=f"Duration: {duration_ms}ms"
+                )
+
+                if on_tool_end:
+                    on_tool_end(fn_name, clean_result)
+
+                session.add_message(role="tool", content=clean_result, tool_call_id=tc.id)
+                messages.append({"role": "tool", "tool_call_id": tc.id, "content": clean_result})
+
+        return "Task completed."
+
+    def chat(self, user_input: str, on_tool_start=None, on_tool_end=None) -> str:
+        """Synchronous wrapper for legacy CLI launchers (run.bat)."""
+        session = session_manager.get_or_create_session("cli_session")
+        try:
+            return asyncio.run(
+                self.chat_async(
+                    session=session,
+                    user_input=user_input,
+                    on_tool_start=on_tool_start,
+                    on_tool_end=on_tool_end,
+                    on_approval_needed=lambda req: approval_manager.decide(req["id"], "approve")
+                )
+            )
+        except Exception as e:
+            return f"Error: {str(e)}"
