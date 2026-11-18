@@ -35,14 +35,16 @@ WEB_DIST_DIR = BASE_DIR / "web_dist"
 LEGACY_HTML = BASE_DIR / "web" / "index.html"
 START_TIME = time.time()
 
-# Allowed origins: Localhost, LAN, Tailscale
+# Allowed origins: Localhost, LAN, Tailscale (both HTTP and HTTPS)
 DEFAULT_ALLOWED_ORIGINS = [
     "http://localhost:8000",
     "http://127.0.0.1:8000",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
-    "http://192.168.0.140:8000",
-    "http://192.168.0.140:5173",
+    "https://localhost:8443",
+    "https://127.0.0.1:8443",
+    "https://localhost:8000",
+    "https://127.0.0.1:8000",
 ]
 env_origins = os.getenv("ALLOWED_ORIGINS", "")
 ALLOWED_ORIGINS = [o.strip() for o in env_origins.split(",") if o.strip()] if env_origins else DEFAULT_ALLOWED_ORIGINS
@@ -52,7 +54,7 @@ app = FastAPI(title="JARVIS Interface v3 Core Gateway")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
-    allow_origin_regex=r"http://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|100\.\d+\.\d+\.\d+)(:\d+)?",
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|100\.\d+\.\d+\.\d+)(:\d+)?",
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
@@ -245,6 +247,44 @@ async def add_memory_rule(req: LogMemoryRequest, auth: bool = Depends(authentica
 async def get_activity(limit: int = 40, auth: bool = Depends(authenticate_request)):
     return {"activity": audit_logger.get_recent_events(limit)}
 
+# OpenJarvis Learning & Traces
+@app.get("/api/traces")
+async def get_traces(limit: int = 30, auth: bool = Depends(authenticate_request)):
+    from learning.traces import trace_store
+    return {"traces": trace_store.list_traces(limit=limit)}
+
+class TraceFeedbackRequest(BaseModel):
+    score: float  # 1.0 (positive), -1.0 (negative)
+    notes: Optional[str] = None
+
+@app.post("/api/traces/{trace_id}/feedback")
+async def update_trace_feedback(trace_id: str, req: TraceFeedbackRequest, auth: bool = Depends(authenticate_request)):
+    from learning.traces import trace_store
+    success = trace_store.update_feedback(trace_id, req.score, req.notes)
+    if not success:
+        raise HTTPException(status_code=404, detail="Trace not found.")
+    return {"status": "feedback_recorded", "trace_id": trace_id, "score": req.score}
+
+@app.post("/api/learning/evolve")
+async def evolve_learning(auth: bool = Depends(authenticate_request)):
+    from learning.evolver import AgentConfigEvolver
+    evolver = AgentConfigEvolver()
+    result = evolver.analyze_feedback_and_evolve()
+    return result
+
+# OpenJarvis Skills Catalog
+@app.get("/api/skills")
+async def get_skills(auth: bool = Depends(authenticate_request)):
+    from skills.manager import skill_manager
+    return {"skills": skill_manager.list_skills()}
+
+# OpenJarvis Daily Morning Digest
+@app.get("/api/digest")
+async def get_daily_digest(location: str = "auto", auth: bool = Depends(authenticate_request)):
+    from agents.morning_digest import generate_morning_digest
+    digest = generate_morning_digest(location=location)
+    return digest
+
 # Audio & Voices
 @app.get("/api/voices")
 async def get_voices(auth: bool = Depends(authenticate_request)):
@@ -264,6 +304,19 @@ async def get_audio(audio_id: str):
     if path and path.exists():
         return FileResponse(path, media_type="audio/mpeg", headers={"Cache-Control": "public, max-age=86400"})
     raise HTTPException(status_code=404, detail="Audio file not found")
+
+@app.get("/jarvis-ca.crt")
+@app.get("/ca.crt")
+async def download_ca_certificate():
+    ca_path = BASE_DIR / "certs" / "ca.crt"
+    if ca_path.exists():
+        return FileResponse(
+            ca_path,
+            media_type="application/x-x509-ca-cert",
+            filename="jarvis-ca.crt",
+            headers={"Content-Disposition": 'attachment; filename="jarvis-ca.crt"'}
+        )
+    raise HTTPException(status_code=404, detail="Root CA certificate not found on server.")
 
 # ----------------- AUTHENTICATED WEBSOCKET -----------------
 
@@ -312,91 +365,96 @@ async def websocket_endpoint(websocket: WebSocket):
                 session_id = data.get("session_id", "default")
                 text = data.get("text", "").strip()
                 wants_voice = data.get("voice", True)
+                text_first = data.get("text_first") is True
 
                 if not text:
                     continue
 
                 session = session_manager.get_or_create_session(session_id)
 
-                # Callbacks for streaming events to the UI
-                def on_thought(thought_text):
-                    asyncio.run_coroutine_threadsafe(
-                        websocket.send_json({
-                            "type": "thought",
-                            "session_id": session_id,
-                            "text": thought_text
-                        }),
-                        loop
-                    )
+                async def process_chat(sess, user_text, voice, send_text_first):
+                    # Callbacks for streaming events to the UI
+                    def on_thought(thought_text):
+                        asyncio.run_coroutine_threadsafe(
+                            websocket.send_json({
+                                "type": "thought",
+                                "session_id": sess.id,
+                                "text": thought_text
+                            }),
+                            loop
+                        )
 
-                def on_tool_start(fn_name, args):
-                    asyncio.run_coroutine_threadsafe(
-                        websocket.send_json({
-                            "type": "tool_start",
-                            "session_id": session_id,
-                            "tool": fn_name,
-                            "args": args
-                        }),
-                        loop
-                    )
+                    def on_tool_start(fn_name, args):
+                        asyncio.run_coroutine_threadsafe(
+                            websocket.send_json({
+                                "type": "tool_start",
+                                "session_id": sess.id,
+                                "tool": fn_name,
+                                "args": args
+                            }),
+                            loop
+                        )
 
-                def on_tool_end(fn_name, result):
-                    asyncio.run_coroutine_threadsafe(
-                        websocket.send_json({
-                            "type": "tool_end",
-                            "session_id": session_id,
-                            "tool": fn_name,
-                            "result": result[:200]
-                        }),
-                        loop
-                    )
+                    def on_tool_end(fn_name, result):
+                        asyncio.run_coroutine_threadsafe(
+                            websocket.send_json({
+                                "type": "tool_end",
+                                "session_id": sess.id,
+                                "tool": fn_name,
+                                "result": result[:200]
+                            }),
+                            loop
+                        )
 
-                def on_approval_needed(req_dict):
-                    asyncio.run_coroutine_threadsafe(
-                        websocket.send_json({
-                            "type": "approval_required",
-                            "session_id": session_id,
-                            "request": req_dict
-                        }),
-                        loop
-                    )
+                    def on_approval_needed(req_dict):
+                        asyncio.run_coroutine_threadsafe(
+                            websocket.send_json({
+                                "type": "approval_required",
+                                "session_id": sess.id,
+                                "request": req_dict
+                            }),
+                            loop
+                        )
 
-                # Run ReAct in executor thread to prevent blocking
-                async with session.turn_lock:
-                    response_text = await agent.chat_async(
-                        session=session, user_input=text, on_thought=on_thought,
-                        on_tool_start=on_tool_start, on_tool_end=on_tool_end,
-                        on_approval_needed=on_approval_needed
-                    )
-                    reply = session.messages[-1] if session.messages else {}
-                    if reply.get("role") != "assistant" or reply.get("tool_calls"):
-                        reply = session.add_message("assistant", response_text)
-                response = {"type": "response", "session_id": session.id,
-                            "message_id": reply["id"], "text": response_text}
-                text_first = data.get("text_first") is True
-                if text_first:
-                    await websocket.send_json(response)
+                    # Run ReAct in executor thread to prevent blocking
+                    async with sess.turn_lock:
+                        response_text = await agent.chat_async(
+                            session=sess, user_input=user_text, on_thought=on_thought,
+                            on_tool_start=on_tool_start, on_tool_end=on_tool_end,
+                            on_approval_needed=on_approval_needed
+                        )
+                        reply = sess.messages[-1] if sess.messages else {}
+                        if reply.get("role") != "assistant" or reply.get("tool_calls"):
+                            reply = sess.add_message("assistant", response_text)
+                    response = {"type": "response", "session_id": sess.id,
+                                "message_id": reply["id"], "text": response_text}
+                    if send_text_first:
+                        await websocket.send_json(response)
 
-                audio_meta = None
-                if wants_voice and speaker.api_key and not session.is_cancelled:
-                    await websocket.send_json({"type": "audio_state", "state": "generating"})
-                    audio_meta = await loop.run_in_executor(
-                        None,
-                        lambda: speaker.generate_speech(response_text, session_id=session.id, message_id=reply["id"])
-                    )
+                    audio_meta = None
+                    if voice and speaker.api_key and not sess.is_cancelled:
+                        await websocket.send_json({"type": "audio_state", "state": "generating"})
+                        audio_meta = await loop.run_in_executor(
+                            None,
+                            lambda: speaker.generate_speech(response_text, session_id=sess.id, message_id=reply["id"])
+                        )
 
-                audio_id = audio_meta["audio_id"] if audio_meta else None
-                audio_url = f"/api/audio/{audio_id}" if audio_id else None
+                    audio_id = audio_meta["audio_id"] if audio_meta else None
+                    audio_url = f"/api/audio/{audio_id}" if audio_id else None
 
-                if audio_id and session_manager.get_session(session.id) is session:
-                    reply["audio_id"] = audio_id
-                    session.save()
-                audio_fields = {"audio_id": audio_id, "audio_url": audio_url}
-                if not text_first:
-                    await websocket.send_json({**response, **audio_fields})
-                elif wants_voice and not session.is_cancelled:
-                    await websocket.send_json({"type": "reply_audio", "session_id": session.id,
-                                               "message_id": reply["id"], **audio_fields})
+                    if audio_id and session_manager.get_session(sess.id) is sess:
+                        reply["audio_id"] = audio_id
+                        sess.save()
+                    audio_fields = {"audio_id": audio_id, "audio_url": audio_url}
+                    if not send_text_first:
+                        await websocket.send_json({**response, **audio_fields})
+                    elif voice and not sess.is_cancelled:
+                        await websocket.send_json({"type": "reply_audio", "session_id": sess.id,
+                                                   "message_id": reply["id"], **audio_fields})
+
+                # Spawn as a background task on the loop so the websocket receive loop stays unblocked
+                # to process approval decisions, cancellations, and pings concurrently.
+                asyncio.create_task(process_chat(session, text, wants_voice, text_first))
 
     except WebSocketDisconnect:
         pass
@@ -432,6 +490,8 @@ async def serve_pwa(full_path: str):
     return HTMLResponse("<h1>JARVIS Gateway Online</h1>", status_code=200)
 
 if __name__ == "__main__":
+    import sys
+    import threading
     import uvicorn
     try:
         import websockets  # noqa: F401
@@ -439,19 +499,68 @@ if __name__ == "__main__":
         raise SystemExit(
             "Missing WebSocket runtime. Run: python -m pip install -r requirements.txt"
         ) from exc
+
+    # Keep laptop awake while JARVIS server runs
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            # ES_CONTINUOUS (0x80000000) | ES_SYSTEM_REQUIRED (0x00000001) | ES_DISPLAY_REQUIRED (0x00000002)
+            ctypes.windll.kernel32.SetThreadExecutionState(0x80000003)
+            print("[Power] Windows execution state: Prevented sleep while server is online.")
+        except Exception as e:
+            print(f"[Power Warning] Could not set execution state: {e}")
+
+    certs_dir = BASE_DIR / "certs"
+    server_key = certs_dir / "server.key"
+    fullchain_crt = certs_dir / "fullchain.crt"
+
+    # Automatically generate certs if missing
+    if not server_key.exists() or not fullchain_crt.exists():
+        try:
+            from scripts.generate_certs import generate_certificates
+            generate_certificates()
+        except Exception as e:
+            print(f"[Warning] Failed to generate SSL certificates: {e}")
+
     ips = get_lan_and_tailscale_ips()
     primary_lan = ips["lan"][0] if ips["lan"] else "localhost"
     primary_ts = ips["tailscale"][0] if ips["tailscale"] else None
 
+    has_ssl = server_key.exists() and fullchain_crt.exists()
+    http_port = int(os.getenv("PORT", "8000"))
+    https_port = int(os.getenv("SSL_PORT", "8443"))
+
     print("\n" + "="*68)
     print("🤖 JARVIS INTERFACE v3 - SECURE GATEWAY ONLINE")
-    print(f"🔑 Owner Auth Token: {OWNER_TOKEN}")
-    print(f"👉 Local Access:     http://localhost:8000")
-    print(f"📱 LAN Access:       http://{primary_lan}:8000")
+    print("🔑 Owner Auth Token: [CONFIGURED IN .env - NEVER SHARED IN LOGS]")
+    print(f"👉 Local Access (HTTP):   http://localhost:{http_port}")
+    if has_ssl:
+        print(f"🔒 Local Access (HTTPS):  https://localhost:{https_port}")
+        print(f"📱 Phone Access (HTTPS):  https://{primary_lan}:{https_port}")
+        print(f"📥 Phone CA Install:      http://{primary_lan}:{http_port}/jarvis-ca.crt")
+    else:
+        print(f"📱 Phone Access (HTTP):   http://{primary_lan}:{http_port}")
     if primary_ts:
-        print(f"🔒 Tailscale Access: http://{primary_ts}:8000")
+        print(f"🔒 Tailscale Access:      http://{primary_ts}:{http_port}")
+        if has_ssl:
+            print(f"🔒 Tailscale HTTPS:       https://{primary_ts}:{https_port}")
     print("="*68 + "\n")
 
-    # Pin the protocol implementation so a broken environment fails loudly
-    # instead of serving HTTP while silently routing /ws to the PWA fallback.
-    uvicorn.run(app, host="0.0.0.0", port=8000, ws="websockets")
+    if has_ssl:
+        def run_http():
+            uvicorn.run(app, host="0.0.0.0", port=http_port, ws="websockets", log_level="warning")
+
+        http_thread = threading.Thread(target=run_http, daemon=True)
+        http_thread.start()
+
+        uvicorn.run(
+            app,
+            host="0.0.0.0",
+            port=https_port,
+            ws="websockets",
+            ssl_keyfile=str(server_key),
+            ssl_certfile=str(fullchain_crt),
+            log_level="info",
+        )
+    else:
+        uvicorn.run(app, host="0.0.0.0", port=http_port, ws="websockets")

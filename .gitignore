@@ -31,5 +31,12 @@ web_dist/
 
 # Runtime session data & audit logs
 memory/sessions/*.json
+memory/traces/
 memory/audit.jsonl
+
+# TLS Certificates & Private Keys
+certs/
+*.key
+*.csr
+*.srl
 

@@ -106,3 +106,13 @@ def test_rate_limiter():
     assert limiter.is_allowed("client_1") is True
     assert limiter.is_allowed("client_1") is False
     assert limiter.is_allowed("client_2") is True
+
+def test_ca_certificate_endpoint():
+    from fastapi.testclient import TestClient
+    import server
+    with TestClient(server.app) as client:
+        res = client.get("/ca.crt")
+        assert res.status_code == 200
+        assert "application/x-x509-ca-cert" in res.headers.get("content-type", "")
+        assert b"BEGIN CERTIFICATE" in res.content
+

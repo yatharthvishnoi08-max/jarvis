@@ -12,3 +12,7 @@ fastapi>=0.115.0
 # The standard extra installs the WebSocket protocol implementation used by /ws.
 # Plain `uvicorn` can serve HTTP while silently rejecting WebSocket upgrades.
 uvicorn[standard]>=0.30.0
+httpx>=0.27.0
+ddgs>=9.16.0
+pypdf>=5.0.0
+croniter>=2.0.0

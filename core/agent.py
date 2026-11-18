@@ -1,5 +1,6 @@
 import json
 import time
+import uuid
 import asyncio
 from pathlib import Path
 from typing import Optional, Callable, Dict, Any, List
@@ -30,10 +31,46 @@ from tools.meta_tools import (
     log_learned_rule,
     read_memory,
 )
+from tools.web_tools import web_search, fetch_web_page
+from tools.code_tools import calculator, code_interpreter, apply_unified_patch
+from tools.dev_tools import git_status, git_diff, git_log
+from tools.doc_tools import read_pdf, get_weather
+from agents.deep_research import run_deep_research
+from agents.morning_digest import generate_morning_digest
+from agents.loop_guard import LoopGuard
+from skills.manager import skill_manager
+from learning.traces import trace_store, ExecutionTrace, ToolExecutionStep
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+# Helper sync wrappers for tools
+def _sync_deep_research(topic: str) -> str:
+    try:
+        return asyncio.run(run_deep_research(topic, max_hops=2))
+    except RuntimeError:
+        # If already in an event loop in this thread, run via a worker thread
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+            return ex.submit(lambda: asyncio.run(run_deep_research(topic, max_hops=2))).result()
+
+def _get_morning_digest(location: str = "auto") -> str:
+    res = generate_morning_digest(location=location)
+    return res["markdown"]
+
+def _list_skills() -> str:
+    skills = skill_manager.list_skills()
+    if not skills:
+        return "No skills currently in catalog."
+    return "\n".join([f"- **{s['name']}**: {s['description']}" for s in skills])
+
+def _inspect_skill(skill_name: str) -> str:
+    skill = skill_manager.get_skill(skill_name)
+    if not skill:
+        return f"Skill '{skill_name}' not found."
+    return f"# Skill: {skill.name}\n\n{skill.content}"
+
 TOOL_FUNCTIONS = {
+    # System & Meta
     "execute_powershell": execute_powershell,
     "read_file": read_file,
     "write_file": write_file,
@@ -44,9 +81,29 @@ TOOL_FUNCTIONS = {
     "update_employee_sop": update_employee_sop,
     "log_learned_rule": log_learned_rule,
     "read_memory": read_memory,
+    # Web & Research
+    "web_search": web_search,
+    "fetch_web_page": fetch_web_page,
+    "run_deep_research": _sync_deep_research,
+    "generate_morning_digest": _get_morning_digest,
+    # Code & Math
+    "calculator": calculator,
+    "code_interpreter": code_interpreter,
+    "apply_unified_patch": apply_unified_patch,
+    # Git
+    "git_status": git_status,
+    "git_diff": git_diff,
+    "git_log": git_log,
+    # Docs & Environment
+    "read_pdf": read_pdf,
+    "get_weather": get_weather,
+    # Skills
+    "list_skills": _list_skills,
+    "inspect_skill": _inspect_skill,
 }
 
 TOOL_SCHEMAS = [
+    # 1. execute_powershell
     {
         "type": "function",
         "function": {
@@ -61,48 +118,52 @@ TOOL_SCHEMAS = [
             }
         }
     },
+    # 2. read_file
     {
         "type": "function",
         "function": {
             "name": "read_file",
-            "description": "Read the text content of a file on the machine.",
+            "description": "Read content from a file on the host filesystem.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Absolute or relative path to the file."}
+                    "path": {"type": "string", "description": "Path to the file to read."}
                 },
                 "required": ["path"]
             }
         }
     },
+    # 3. write_file
     {
         "type": "function",
         "function": {
             "name": "write_file",
-            "description": "Write or create a text file with content on disk.",
+            "description": "Write or overwrite content to a file on the host filesystem.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Path of the file to create or overwrite."},
-                    "content": {"type": "string", "description": "The full text content to write."}
+                    "path": {"type": "string", "description": "Target file path."},
+                    "content": {"type": "string", "description": "Full text content to write."}
                 },
                 "required": ["path", "content"]
             }
         }
     },
+    # 4. list_directory
     {
         "type": "function",
         "function": {
             "name": "list_directory",
-            "description": "List files and directories in a given folder path.",
+            "description": "List files and subdirectories in a directory path.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Directory path to list. Defaults to current working directory."}
+                    "path": {"type": "string", "description": "Directory path to list (defaults to current dir)."}
                 }
             }
         }
     },
+    # 5. get_system_stats
     {
         "type": "function",
         "function": {
@@ -111,6 +172,7 @@ TOOL_SCHEMAS = [
             "parameters": {"type": "object", "properties": {}}
         }
     },
+    # 6. list_employees
     {
         "type": "function",
         "function": {
@@ -119,6 +181,7 @@ TOOL_SCHEMAS = [
             "parameters": {"type": "object", "properties": {}}
         }
     },
+    # 7. read_employee_sop
     {
         "type": "function",
         "function": {
@@ -133,6 +196,7 @@ TOOL_SCHEMAS = [
             }
         }
     },
+    # 8. update_employee_sop
     {
         "type": "function",
         "function": {
@@ -148,11 +212,12 @@ TOOL_SCHEMAS = [
             }
         }
     },
+    # 9. log_learned_rule
     {
         "type": "function",
         "function": {
             "name": "log_learned_rule",
-            "description": "Store a long-term lesson, user preference, or system quirk into persistent memory.",
+            "description": "Store a permanent long-term rule, lesson, or preference across all sessions on disk. Never use this for temporary words or context specific to the current conversation.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -163,12 +228,212 @@ TOOL_SCHEMAS = [
             }
         }
     },
+    # 10. read_memory
     {
         "type": "function",
         "function": {
             "name": "read_memory",
             "description": "Read all recorded rules, system memories, and user preferences.",
             "parameters": {"type": "object", "properties": {}}
+        }
+    },
+    # 11. web_search
+    {
+        "type": "function",
+        "function": {
+            "name": "web_search",
+            "description": "Search the live web for real-time information, technical docs, current events, and news.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "The web search query."},
+                    "max_results": {"type": "integer", "description": "Max results to return (1-10)."}
+                },
+                "required": ["query"]
+            }
+        }
+    },
+    # 12. fetch_web_page
+    {
+        "type": "function",
+        "function": {
+            "name": "fetch_web_page",
+            "description": "Fetch external web page content as clean, readable text. Use to inspect articles, API documentation, and links.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "The full HTTP/HTTPS URL to fetch."}
+                },
+                "required": ["url"]
+            }
+        }
+    },
+    # 13. calculator
+    {
+        "type": "function",
+        "function": {
+            "name": "calculator",
+            "description": "Safely compute mathematical calculations and formulas (supports sqrt, log, sin, cos, powers, etc.).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "expression": {"type": "string", "description": "Mathematical expression to evaluate (e.g. 'sqrt(144) + 12')."}
+                },
+                "required": ["expression"]
+            }
+        }
+    },
+    # 14. code_interpreter
+    {
+        "type": "function",
+        "function": {
+            "name": "code_interpreter",
+            "description": "Execute Python code in an isolated environment with AST safety validation. Returns stdout and stderr.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "code": {"type": "string", "description": "The Python code snippet to run."}
+                },
+                "required": ["code"]
+            }
+        }
+    },
+    # 15. apply_unified_patch
+    {
+        "type": "function",
+        "function": {
+            "name": "apply_unified_patch",
+            "description": "Apply a unified diff patch string cleanly to a target file on disk.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "patch_text": {"type": "string", "description": "Unified diff patch text."}
+                },
+                "required": ["patch_text"]
+            }
+        }
+    },
+    # 16. git_status
+    {
+        "type": "function",
+        "function": {
+            "name": "git_status",
+            "description": "Inspect the current git working tree status and branch.",
+            "parameters": {"type": "object", "properties": {}}
+        }
+    },
+    # 17. git_diff
+    {
+        "type": "function",
+        "function": {
+            "name": "git_diff",
+            "description": "View unstaged or staged git diff changes.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "staged": {"type": "boolean", "description": "Whether to view staged changes."},
+                    "file_path": {"type": "string", "description": "Specific file to diff."}
+                }
+            }
+        }
+    },
+    # 18. git_log
+    {
+        "type": "function",
+        "function": {
+            "name": "git_log",
+            "description": "View recent git commit history.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "description": "Number of commits to return (default 5)."}
+                }
+            }
+        }
+    },
+    # 19. read_pdf
+    {
+        "type": "function",
+        "function": {
+            "name": "read_pdf",
+            "description": "Read and extract text from a local PDF document.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Path to the PDF file."},
+                    "max_pages": {"type": "integer", "description": "Maximum pages to extract."}
+                },
+                "required": ["file_path"]
+            }
+        }
+    },
+    # 20. get_weather
+    {
+        "type": "function",
+        "function": {
+            "name": "get_weather",
+            "description": "Look up current weather conditions and forecast for any city or location worldwide.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "location": {"type": "string", "description": "City name or location (e.g. 'London', 'Tokyo', 'San Francisco')."},
+                    "units": {"type": "string", "description": "'metric' (Celsius) or 'imperial' (Fahrenheit)."}
+                },
+                "required": ["location"]
+            }
+        }
+    },
+    # 21. run_deep_research
+    {
+        "type": "function",
+        "function": {
+            "name": "run_deep_research",
+            "description": "Execute an autonomous multi-hop web investigation synthesizing a cited research report on any complex topic.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "topic": {"type": "string", "description": "The research subject or question."}
+                },
+                "required": ["topic"]
+            }
+        }
+    },
+    # 22. generate_morning_digest
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_morning_digest",
+            "description": "Synthesize a comprehensive daily executive morning briefing including system health, weather, and world intelligence.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "location": {"type": "string", "description": "Location for weather report (optional)."}
+                }
+            }
+        }
+    },
+    # 23. list_skills
+    {
+        "type": "function",
+        "function": {
+            "name": "list_skills",
+            "description": "List all expert on-demand skills available in the catalog.",
+            "parameters": {"type": "object", "properties": {}}
+        }
+    },
+    # 24. inspect_skill
+    {
+        "type": "function",
+        "function": {
+            "name": "inspect_skill",
+            "description": "Read the detailed instructions, guidelines, and methodology of an expert skill.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "skill_name": {"type": "string", "description": "Name of the skill to inspect."}
+                },
+                "required": ["skill_name"]
+            }
         }
     }
 ]
@@ -185,9 +450,11 @@ class JarvisAgent:
 
         employees_info = list_employees()
         memory_info = read_memory()
+        skills_info = _list_skills()
 
         return (
             f"{base_prompt}\n\n"
+            f"## Available Expert Skills Catalog:\n{skills_info}\n\n"
             f"## Current Team Roster:\n{employees_info}\n\n"
             f"## Persistent System Memory:\n{memory_info}\n"
         )
@@ -203,14 +470,20 @@ class JarvisAgent:
     ) -> str:
         """
         Asynchronous ReAct loop with:
+        - LoopGuard protection against infinite/repetitive tool cycles
+        - TraceStore recording for continuous learning
         - Per-session message isolation
-        - Emergency stop check
         - Strict tool policy checks (READ, CONFIRM, CRITICAL, BLOCKED)
         - Asynchronous user approval gates
         - Audit trail logging
         """
         session.reset_cancellation()
         session.add_message(role="user", content=user_input)
+
+        loop_guard = LoopGuard()
+        trace_steps: List[ToolExecutionStep] = []
+        recorded_thoughts: List[str] = []
+        turn_start_time = time.time()
 
         # Assemble conversation history for the LLM
         messages = [{"role": "system", "content": self.build_system_prompt()}]
@@ -259,6 +532,22 @@ class JarvisAgent:
             if not message.tool_calls:
                 final_content = redact_secrets(message.content or "")
                 session.add_message(role="assistant", content=final_content)
+
+                # Record execution trace for learning
+                total_duration = round(time.time() - turn_start_time, 3)
+                trace = ExecutionTrace(
+                    trace_id=f"tr_{uuid.uuid4().hex[:12]}",
+                    session_id=session.id,
+                    user_query=user_input,
+                    response_text=final_content,
+                    timestamp=time.time(),
+                    duration_seconds=total_duration,
+                    model_name=self.model_name,
+                    thoughts=recorded_thoughts,
+                    steps=trace_steps
+                )
+                trace_store.record_trace(trace)
+
                 return final_content
 
             # Format tool calls
@@ -275,8 +564,10 @@ class JarvisAgent:
             ]
 
             assistant_content = redact_secrets(message.content or "")
-            if on_thought and assistant_content:
-                on_thought(assistant_content)
+            if assistant_content:
+                recorded_thoughts.append(assistant_content)
+                if on_thought:
+                    on_thought(assistant_content)
 
             session.add_message(
                 role="assistant",
@@ -304,7 +595,15 @@ class JarvisAgent:
                 if not isinstance(args, dict):
                     args = {}
 
-                # 1. Evaluate tool policy
+                # 1. LoopGuard check
+                verdict = loop_guard.check(fn_name, args)
+                if verdict.blocked:
+                    blocked_msg = f"LOOP GUARD BLOCKED: {verdict.reason}"
+                    session.add_message(role="tool", content=blocked_msg, tool_call_id=tc.id)
+                    messages.append({"role": "tool", "tool_call_id": tc.id, "content": blocked_msg})
+                    continue
+
+                # 2. Evaluate tool policy
                 policy_level, policy_reason = classify_tool_call(fn_name, args)
 
                 audit_logger.log_event(
@@ -317,7 +616,7 @@ class JarvisAgent:
                     detail=policy_reason
                 )
 
-                # 2. Check BLOCKED
+                # 3. Check BLOCKED
                 if policy_level == POLICY_BLOCKED:
                     blocked_result = f"SECURITY POLICY BLOCK: Operation '{fn_name}' was blocked. Reason: {policy_reason}"
                     audit_logger.log_event(
@@ -333,9 +632,8 @@ class JarvisAgent:
                     messages.append({"role": "tool", "tool_call_id": tc.id, "content": blocked_result})
                     continue
 
-                # 3. Check CONFIRM or CRITICAL (requires approval)
+                # 4. Check CONFIRM or CRITICAL (requires approval)
                 if policy_level in [POLICY_CONFIRM, POLICY_CRITICAL]:
-                    # Create approval request
                     summary = f"Tool: {fn_name}\nPolicy: {policy_level}\nReason: {policy_reason}"
                     req = approval_manager.create_request(
                         session_id=session.id,
@@ -360,22 +658,33 @@ class JarvisAgent:
                         messages.append({"role": "tool", "tool_call_id": tc.id, "content": reject_msg})
                         continue
 
-                # 4. Execute tool
+                # 5. Execute tool
                 if on_tool_start:
                     on_tool_start(fn_name, args)
 
                 start_time = time.time()
                 fn = TOOL_FUNCTIONS.get(fn_name)
+                step_error = None
                 if fn:
                     try:
                         raw_result = await loop.run_in_executor(None, lambda: fn(**args))
                     except Exception as err:
                         raw_result = f"ERROR executing {fn_name}: {str(err)}"
+                        step_error = str(err)
                 else:
                     raw_result = f"ERROR: Tool '{fn_name}' not found."
+                    step_error = "Tool not found"
 
-                duration_ms = int((time.time() - start_time) * 1000)
+                step_duration = round(time.time() - start_time, 3)
                 clean_result = redact_secrets(str(raw_result))
+
+                trace_steps.append(ToolExecutionStep(
+                    tool_name=fn_name,
+                    args=args,
+                    result=clean_result[:500],
+                    duration_seconds=step_duration,
+                    error=step_error
+                ))
 
                 audit_logger.log_event(
                     event_type="TOOL_EXECUTED",
@@ -383,8 +692,8 @@ class JarvisAgent:
                     tool=fn_name,
                     args=args,
                     policy=policy_level,
-                    status="SUCCESS",
-                    detail=f"Duration: {duration_ms}ms"
+                    status="SUCCESS" if not step_error else "ERROR",
+                    duration_ms=int(step_duration * 1000)
                 )
 
                 if on_tool_end:
@@ -393,20 +702,52 @@ class JarvisAgent:
                 session.add_message(role="tool", content=clean_result, tool_call_id=tc.id)
                 messages.append({"role": "tool", "tool_call_id": tc.id, "content": clean_result})
 
-        return "Task completed."
+        fallback_msg = "Task reached maximum reasoning iterations."
+        session.add_message(role="assistant", content=fallback_msg)
+        return fallback_msg
 
-    def chat(self, user_input: str, on_tool_start=None, on_tool_end=None) -> str:
-        """Synchronous wrapper for legacy CLI launchers (run.bat)."""
-        session = session_manager.get_or_create_session("cli_session")
-        try:
-            return asyncio.run(
-                self.chat_async(
-                    session=session,
-                    user_input=user_input,
-                    on_tool_start=on_tool_start,
-                    on_tool_end=on_tool_end,
-                    on_approval_needed=lambda req: approval_manager.decide(req["id"], "approve")
-                )
+    def chat(self, user_input: str, session_id: str = "terminal") -> str:
+        """
+        Synchronous chat wrapper for terminal execution, interactive CLI, and scripts.
+        Manages the event loop safely and handles terminal approval prompts if tools require CONFIRM/CRITICAL.
+        """
+        session = session_manager.get_or_create_session(session_id)
+
+        def terminal_approval(req_dict: Dict[str, Any]):
+            try:
+                import sys
+                from rich.prompt import Confirm
+                from rich.console import Console
+                c = Console()
+                tool = req_dict.get("tool", "")
+                level = req_dict.get("policy_level", "")
+                args = req_dict.get("args", {})
+                c.print(f"\n[bold yellow]⚠️ APPROVAL REQUIRED ({level})[/bold yellow]")
+                c.print(f"[bold cyan]Tool:[/bold cyan] {tool}")
+                c.print(f"[bold cyan]Arguments:[/bold cyan] {args}")
+                if sys.stdin.isatty():
+                    approved = Confirm.ask(f"Authorize JARVIS to execute '{tool}'?", default=False)
+                    approval_manager.decide(req_dict["id"], "approve" if approved else "reject")
+                else:
+                    approval_manager.decide(req_dict["id"], "approve")
+            except Exception:
+                approval_manager.decide(req_dict.get("id", ""), "reject")
+
+        async def _run():
+            return await self.chat_async(
+                session=session,
+                user_input=user_input,
+                on_approval_needed=terminal_approval
             )
-        except Exception as e:
-            return f"Error: {str(e)}"
+
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+                    return ex.submit(lambda: asyncio.run(_run())).result()
+            else:
+                return loop.run_until_complete(_run())
+        except RuntimeError:
+            return asyncio.run(_run())
+

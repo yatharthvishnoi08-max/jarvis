@@ -21,7 +21,8 @@ class AuditLogger:
         args: Any = None,
         policy: str = "INFO",
         status: str = "SUCCESS",
-        detail: str = ""
+        detail: str = "",
+        **kwargs
     ) -> Dict[str, Any]:
         """Logs an event into audit history with redacted secrets."""
         entry = {
@@ -34,7 +35,8 @@ class AuditLogger:
             "args": args if isinstance(args, (dict, list, str, int, float, bool)) else str(args),
             "policy": policy,
             "status": status,
-            "detail": redact_secrets(detail)
+            "detail": redact_secrets(detail),
+            **kwargs
         }
 
         # Clean args of secrets
