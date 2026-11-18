@@ -5,7 +5,7 @@ import scipy.io.wavfile as wav
 import pytest
 from unittest.mock import patch, MagicMock
 
-from core.listener import VoiceListener, WisprFlowTranscriber
+from core.listener import VoiceListener, WisprFlowTranscriber, LocalWhisperTranscriber
 
 def _generate_synthetic_wav(duration: float = 1.0, sample_rate: int = 16000) -> bytes:
     """Generates synthetic 16kHz sine wave audio bytes."""
@@ -48,7 +48,7 @@ def test_voice_listener_engine_name():
 
     with patch.dict("os.environ", {"WISPR_FLOW_API_KEY": ""}):
         listener.wispr_engine.api_key = ""
-        assert "Fallback" in listener.engine_name
+        assert "Local Neural Whisper" in listener.engine_name
 
 def test_voice_listener_transcribe_wav_wispr_priority():
     listener = VoiceListener()
@@ -59,12 +59,19 @@ def test_voice_listener_transcribe_wav_wispr_priority():
             result = listener.transcribe_wav(synthetic_wav)
             assert result == "Wispr Flow Recognized"
 
+def test_voice_listener_local_whisper_fallback():
+    listener = VoiceListener()
+    synthetic_wav = _generate_synthetic_wav(0.5)
+
+    with patch.object(listener.wispr_engine, "is_configured", return_value=False):
+        with patch.object(listener.local_whisper, "transcribe_wav", return_value="Local Whisper Recognized"):
+            result = listener.transcribe_wav(synthetic_wav)
+            assert result == "Local Whisper Recognized"
+
 def test_pre_roll_ring_buffer():
     listener = VoiceListener()
     assert len(listener.pre_roll_buffer) == 0
-    # Simulate adding chunks
     dummy_chunk = np.zeros(1600, dtype=np.float32)
     for _ in range(10):
         listener.pre_roll_buffer.append(dummy_chunk)
-    # Ring buffer cap is 5
     assert len(listener.pre_roll_buffer) == listener.pre_roll_chunks

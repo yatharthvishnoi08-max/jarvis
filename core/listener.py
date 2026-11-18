@@ -1,8 +1,9 @@
 """
 High-Fidelity Voice Listener Module for JARVIS.
-Integrates Wispr Flow (https://platform-api.wisprflow.ai) as the primary neural
-speech-to-text engine with auto-editing, punctuation, and dictionary context,
-backed by robust energy-based ring-buffer Voice Activity Detection (VAD).
+Supports:
+1. Wispr Flow Voice Interface (Cloud API via WISPR_FLOW_API_KEY)
+2. Local Neural Whisper (via faster-whisper base.en — 100% free, offline, zero API keys required)
+3. Ring-buffer Voice Activity Detection (VAD) with 500ms pre-roll to prevent cutting off the start of speech.
 """
 
 from __future__ import annotations
@@ -40,7 +41,12 @@ class WisprFlowTranscriber:
     """Official Wispr Flow REST API client."""
 
     def __init__(self, api_key: Optional[str] = None):
-        self.api_key = (api_key or os.getenv("WISPR_FLOW_API_KEY") or os.getenv("WISPR_API_KEY") or os.getenv("FLOW_API_KEY") or "").strip()
+        self.api_key = (
+            api_key or
+            os.getenv("WISPR_FLOW_API_KEY") or
+            os.getenv("WISPR_API_KEY") or
+            os.getenv("FLOW_API_KEY") or ""
+        ).strip()
         self._warmed = False
 
     def is_configured(self) -> bool:
@@ -96,24 +102,62 @@ class WisprFlowTranscriber:
                     resp = client.post(endpoint, headers=headers, json=payload)
                 if resp.status_code == 200:
                     data = resp.json()
-                    # Wispr Flow returns {"id": ..., "text": ..., "detected_language": ...}
                     text = data.get("text") or data.get("transcription") or ""
                     return text.strip() if text else None
                 elif resp.status_code == 401:
                     print(f"[Wispr Flow Error]: Authentication failed (HTTP 401). Check WISPR_FLOW_API_KEY.")
                     return None
-                else:
-                    print(f"[Wispr Flow Warning]: Endpoint {endpoint} returned HTTP {resp.status_code}: {resp.text[:120]}")
-            except Exception as e:
+            except Exception:
                 continue
 
         return None
 
 
+class LocalWhisperTranscriber:
+    """Local, offline neural Whisper transcription using faster-whisper (0 API keys required)."""
+
+    def __init__(self, model_size: str = "base.en"):
+        self.model_size = model_size
+        self._model = None
+
+    def _get_model(self):
+        if self._model is None:
+            try:
+                from faster_whisper import WhisperModel
+                # int8 quantization on CPU for low latency and high accuracy
+                self._model = WhisperModel(self.model_size, device="cpu", compute_type="int8")
+            except Exception as e:
+                print(f"[Local Whisper Load Error]: {e}")
+        return self._model
+
+    def transcribe_audio_array(self, audio_float: np.ndarray, sample_rate: int = 16000) -> Optional[str]:
+        model = self._get_model()
+        if model is None:
+            return None
+        try:
+            segments, info = model.transcribe(audio_float, beam_size=1)
+            text = " ".join(s.text for s in segments).strip()
+            return text if text else None
+        except Exception as e:
+            print(f"[Local Whisper Error]: {e}")
+            return None
+
+    def transcribe_wav(self, wav_bytes: bytes) -> Optional[str]:
+        try:
+            sr, data = wav.read(io.BytesIO(wav_bytes))
+            if data.dtype == np.int16:
+                audio = data.astype(np.float32) / 32768.0
+            else:
+                audio = data.astype(np.float32)
+            return self.transcribe_audio_array(audio, sample_rate=sr)
+        except Exception:
+            return None
+
+
 class VoiceListener:
     """
     Intelligent Audio Capture and Voice Activity Detection (VAD) system.
-    Feeds high-fidelity 16kHz audio into Wispr Flow, with fallback support.
+    Automatically routes audio to Wispr Flow (if key configured) or Local Neural Whisper (zero key required).
     """
 
     def __init__(self, sample_rate: int = 16000):
@@ -125,15 +169,16 @@ class VoiceListener:
         self.pre_roll_chunks = 5
         self.pre_roll_buffer: deque[np.ndarray] = deque(maxlen=self.pre_roll_chunks)
 
-        # Wispr Flow engine
+        # Transcribers
         self.wispr_engine = WisprFlowTranscriber()
         if self.wispr_engine.is_configured():
             self.wispr_engine.warmup()
 
+        self.local_whisper = LocalWhisperTranscriber(model_size="base.en")
+
     @property
     def engine_name(self) -> str:
         """Returns the active speech recognition engine name."""
-        # Reload env in case user updated .env at runtime
         load_dotenv(BASE_DIR / ".env", override=False)
         self.wispr_engine.api_key = (
             os.getenv("WISPR_FLOW_API_KEY") or
@@ -142,8 +187,8 @@ class VoiceListener:
         ).strip()
         
         if self.wispr_engine.is_configured():
-            return "Wispr Flow"
-        return "Google Speech (Fallback — set WISPR_FLOW_API_KEY in .env)"
+            return "Wispr Flow (Cloud API)"
+        return "Local Neural Whisper (Offline, Free, High-Accuracy)"
 
     def listen(
         self,
@@ -155,7 +200,7 @@ class VoiceListener:
         Captures microphone input using energy-based ring-buffer VAD.
         - Preserves sentence start via 500ms pre-roll.
         - Dynamically tracks noise floor without blocking speech onset.
-        - Transcribes with Wispr Flow.
+        - Transcribes with Local Whisper or Wispr Flow.
         """
         self.pre_roll_buffer.clear()
         recorded_chunks: List[np.ndarray] = []
@@ -186,7 +231,6 @@ class VoiceListener:
                     if not is_speaking:
                         recent_energies.append(rms)
                         if len(recent_energies) >= 5:
-                            # 20th percentile as estimated background floor
                             noise_floor = max(float(np.percentile(recent_energies, 20)), 0.008)
 
                     speech_threshold = max(noise_floor * 2.2, 0.016)
@@ -226,7 +270,7 @@ class VoiceListener:
         if not recorded_chunks or len(recorded_chunks) < 4:
             return None
 
-        # Assemble audio into 16-bit PCM WAV
+        # Assemble audio into float32 array and 16-bit PCM WAV
         full_audio = np.concatenate(recorded_chunks, axis=0)
         int16_audio = np.clip(full_audio * 32767.0, -32768, 32767).astype(np.int16)
 
@@ -244,13 +288,25 @@ class VoiceListener:
         if status_callback:
             status_callback("transcribing")
 
-        return self.transcribe_wav(wav_bytes)
+        # 1. Primary Cloud: Wispr Flow (if key configured)
+        if self.wispr_engine.is_configured():
+            text = self.wispr_engine.transcribe(wav_bytes)
+            if text:
+                return text
+
+        # 2. Local Neural Whisper (0 API keys required, completely offline)
+        local_text = self.local_whisper.transcribe_audio_array(full_audio, sample_rate=self.sample_rate)
+        if local_text:
+            return local_text
+
+        # 3. Fallback: SpeechRecognition
+        return self._fallback_transcribe(wav_bytes)
 
     def transcribe_wav(self, wav_bytes: bytes) -> Optional[str]:
         """
-        Transcribes WAV bytes using Wispr Flow, falling back seamlessly if unconfigured.
+        Transcribes WAV bytes using Wispr Flow (if key configured),
+        Local Whisper (zero keys needed), or fallback.
         """
-        # Reload env in case key was added
         load_dotenv(BASE_DIR / ".env", override=False)
         self.wispr_engine.api_key = (
             os.getenv("WISPR_FLOW_API_KEY") or
@@ -258,30 +314,21 @@ class VoiceListener:
             os.getenv("FLOW_API_KEY") or ""
         ).strip()
 
-        # 1. Primary: Wispr Flow REST API
+        # 1. Wispr Flow REST API
         if self.wispr_engine.is_configured():
             text = self.wispr_engine.transcribe(wav_bytes)
             if text:
                 return text
 
-        # 2. Secondary: wisprflow_sdk (local desktop client session if active)
-        try:
-            import wisprflow_sdk
-            # Write temporary WAV for SDK
-            temp_wav = AUDIO_CACHE / "wispr_tmp.wav"
-            temp_wav.write_bytes(wav_bytes)
-            client = wisprflow_sdk.WisprClient()
-            res = client.transcribe(str(temp_wav))
-            if res and hasattr(res, "final") and res.final:
-                try:
-                    temp_wav.unlink()
-                except Exception:
-                    pass
-                return res.final.strip()
-        except Exception:
-            pass
+        # 2. Local Neural Whisper
+        local_text = self.local_whisper.transcribe_wav(wav_bytes)
+        if local_text:
+            return local_text
 
-        # 3. Fallback: SpeechRecognition (Google Free Engine)
+        # 3. Fallback: SpeechRecognition
+        return self._fallback_transcribe(wav_bytes)
+
+    def _fallback_transcribe(self, wav_bytes: bytes) -> Optional[str]:
         try:
             import speech_recognition as sr
             recognizer = sr.Recognizer()
@@ -290,5 +337,5 @@ class VoiceListener:
                     audio_data = recognizer.record(source)
                     text = recognizer.recognize_google(audio_data)
                     return text.strip() if text else None
-        except Exception as e:
+        except Exception:
             return None
