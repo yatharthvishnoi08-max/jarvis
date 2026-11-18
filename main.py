@@ -26,8 +26,13 @@ def run_hands_free_loop(agent: JarvisAgent, speaker: ElevenLabsSpeaker, listener
 
     while True:
         try:
-            with console.status("[bold cyan]🎙️ Listening... (Speak now)[/bold cyan]", spinner="arc"):
-                spoken_text = listener.listen(silence_limit=1.3, max_duration=20.0)
+            with console.status("[bold cyan]🎙️ Listening... (Speak naturally, Wispr Flow active)[/bold cyan]", spinner="arc") as status_spin:
+                def on_status_change(state):
+                    if state == "recording":
+                        status_spin.update("[bold green]🔴 Recording voice...[/bold green]")
+                    elif state == "transcribing":
+                        status_spin.update("[bold cyan]⚡ Transcribing speech...[/bold cyan]")
+                spoken_text = listener.listen(silence_limit=1.8, max_duration=25.0, status_callback=on_status_change)
 
             if not spoken_text:
                 continue
@@ -62,11 +67,13 @@ def main():
     listener = VoiceListener()
 
     voice_out_status = "[green]Enabled (ElevenLabs)[/green]" if speaker.api_key else "[dim]Disabled[/dim]"
+    stt_status = f"[green]{listener.engine_name}[/green]"
 
     console.print(
         Panel.fit(
             "[bold cyan]🤖 JARVIS Agent System[/bold cyan]\n"
-            f"[white]Voice Output:[/white] {voice_out_status} | [white]Mic Input:[/white] [green]Ready[/green]\n"
+            f"[white]Voice Output:[/white] {voice_out_status}\n"
+            f"[white]Speech Input:[/white] {stt_status}\n"
             "[dim]Type your message, or type 'mic' to speak once, or 'handsfree' for continuous mode[/dim]",
             border_style="cyan"
         )
@@ -94,8 +101,13 @@ def main():
 
             # If user pressed enter without typing or typed 'mic'
             if not user_input or user_input.lower() in ["mic", "/mic", "listen"]:
-                with console.status("[bold cyan]🎙️ Listening to your microphone...[/bold cyan]", spinner="arc"):
-                    spoken = listener.listen(silence_limit=1.3)
+                with console.status("[bold cyan]🎙️ Listening to your microphone...[/bold cyan]", spinner="arc") as status_spin:
+                    def on_mic_status(state):
+                        if state == "recording":
+                            status_spin.update("[bold green]🔴 Recording voice...[/bold green]")
+                        elif state == "transcribing":
+                            status_spin.update("[bold cyan]⚡ Transcribing speech...[/bold cyan]")
+                    spoken = listener.listen(silence_limit=1.8, status_callback=on_mic_status)
                 if not spoken:
                     console.print("[dim](No speech detected. Type your message or try again)[/dim]")
                     continue
