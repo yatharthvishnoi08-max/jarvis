@@ -5,7 +5,8 @@ from datetime import date
 from pathlib import Path
 from typing import Optional, Callable, Dict, Any, List
 
-from core.client import get_client
+from functools import cached_property
+from core.client import get_client, model_name
 from core.auth import redact_secrets
 from core.audit import audit_logger
 from core.approvals import (
@@ -202,7 +203,12 @@ TOOL_SCHEMAS = [
 
 class JarvisAgent:
     def __init__(self):
-        self.client, self.model_name = get_client()
+        self.model_name = model_name()
+
+    @cached_property
+    def client(self):
+        client, _ = get_client()
+        return client
 
     def build_system_prompt(self) -> str:
         prompt_file = BASE_DIR / "SOUL.md"

@@ -12,8 +12,10 @@ import { AgentsView } from './components/views/AgentsView';
 import { MemoryView } from './components/views/MemoryView';
 import { SettingsView } from './components/views/SettingsView';
 import { SystemView } from './components/views/SystemView';
+import { BasicChat } from './components/BasicChat';
 
 export const App: React.FC = () => {
+  const workspace = window.location.pathname === '/workspace';
   const { isAuthenticated, isLoading, checkAuth } = useAuthStore();
   const { connectWebSocket, disconnectWebSocket, pendingApprovals } = useJarvisStore();
 
@@ -31,13 +33,13 @@ export const App: React.FC = () => {
   }, [checkAuth]);
 
   useEffect(() => {
-    if (isAuthenticated) {
+    if (isAuthenticated && workspace) {
       connectWebSocket();
     } else {
       disconnectWebSocket();
     }
     return () => disconnectWebSocket();
-  }, [isAuthenticated, connectWebSocket, disconnectWebSocket]);
+  }, [isAuthenticated, workspace, connectWebSocket, disconnectWebSocket]);
 
   if (isLoading) {
     return (
@@ -51,6 +53,7 @@ export const App: React.FC = () => {
   if (!isAuthenticated) {
     return <AuthModal />;
   }
+  if (!workspace) return <BasicChat />;
 
   const handleMobileTabChange = (tab: MobileTab) => {
     setMobileTab(tab);
@@ -69,6 +72,7 @@ export const App: React.FC = () => {
       />
 
       {/* Main Multi-Panel Workspace */}
+      <a href="/" className="self-start px-4 py-2 text-sm text-cyan-300">← Back to chat</a>
       <div className="flex-1 flex overflow-hidden relative">
         {/* Left Navigation Sidebar (Desktop + Drawer) */}
         <LeftSidebar
