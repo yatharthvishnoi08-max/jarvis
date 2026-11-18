@@ -1,7 +1,7 @@
 import React from 'react';
 import { useJarvisStore } from '../stores/useJarvisStore';
 import { useAuthStore } from '../stores/useAuthStore';
-import { Plus, MessageSquare, Trash2, Users, Brain, Activity, Settings, LogOut, X } from 'lucide-react';
+import { Plus, MessageSquare, Trash2, Users, Brain, Activity, Settings, LogOut, X, Terminal, LayoutDashboard } from 'lucide-react';
 
 interface LeftSidebarProps {
   isOpen: boolean;
@@ -9,6 +9,8 @@ interface LeftSidebarProps {
   onOpenAgents: () => void;
   onOpenMemory: () => void;
   onOpenSettings: () => void;
+  currentView?: 'chat' | 'dashboard';
+  onViewChange?: (view: 'chat' | 'dashboard') => void;
 }
 
 export const LeftSidebar: React.FC<LeftSidebarProps> = ({
@@ -16,7 +18,9 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
   onClose,
   onOpenAgents,
   onOpenMemory,
-  onOpenSettings
+  onOpenSettings,
+  currentView = 'chat',
+  onViewChange
 }) => {
   const { sessions, currentSessionId, switchSession, createSession, deleteSession } = useJarvisStore();
   const { logout } = useAuthStore();
@@ -52,6 +56,41 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
             <X className="w-5 h-5" />
           </button>
         </div>
+
+        {/* Primary View Switcher */}
+        {onViewChange && (
+          <div className="px-3 pt-3 pb-2 space-y-1 border-b border-slate-800/80 font-mono text-xs">
+            <button
+              onClick={() => {
+                onViewChange('chat');
+                onClose();
+              }}
+              className={`w-full flex items-center space-x-2.5 px-3 py-2 rounded-lg transition ${
+                currentView === 'chat'
+                  ? 'bg-cyan-950/80 border border-cyan-500/50 text-cyan-200 font-bold shadow-sm'
+                  : 'text-slate-400 hover:bg-obsidian-850 hover:text-cyan-300'
+              }`}
+            >
+              <Terminal className="w-4 h-4 text-cyan-400" />
+              <span>Command HUD Chat</span>
+            </button>
+
+            <button
+              onClick={() => {
+                onViewChange('dashboard');
+                onClose();
+              }}
+              className={`w-full flex items-center space-x-2.5 px-3 py-2 rounded-lg transition ${
+                currentView === 'dashboard'
+                  ? 'bg-cyan-950/80 border border-cyan-500/50 text-cyan-200 font-bold shadow-sm'
+                  : 'text-slate-400 hover:bg-obsidian-850 hover:text-cyan-300'
+              }`}
+            >
+              <LayoutDashboard className="w-4 h-4 text-cyan-400" />
+              <span>Mission Control</span>
+            </button>
+          </div>
+        )}
 
         {/* Sessions List */}
         <div className="flex-1 overflow-y-auto px-2 py-3 space-y-1">

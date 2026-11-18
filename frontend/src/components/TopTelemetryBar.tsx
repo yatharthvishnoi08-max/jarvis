@@ -1,16 +1,20 @@
 import React, { useEffect } from 'react';
 import { useTelemetryStore } from '../stores/useTelemetryStore';
 import { useJarvisStore } from '../stores/useJarvisStore';
-import { Cpu, Activity, HardDrive, ShieldAlert, Wifi, Volume2, VolumeX, Menu } from 'lucide-react';
+import { Cpu, Activity, HardDrive, ShieldAlert, Wifi, Volume2, VolumeX, Menu, Terminal, LayoutDashboard } from 'lucide-react';
 
 interface TopTelemetryBarProps {
   onToggleSidebar?: () => void;
   onOpenSettings?: () => void;
+  currentView?: 'chat' | 'dashboard';
+  onViewChange?: (view: 'chat' | 'dashboard') => void;
 }
 
 export const TopTelemetryBar: React.FC<TopTelemetryBarProps> = ({
   onToggleSidebar,
-  onOpenSettings
+  onOpenSettings,
+  currentView = 'chat',
+  onViewChange
 }) => {
   const { telemetry, fetchTelemetry } = useTelemetryStore();
   const {
@@ -63,6 +67,34 @@ export const TopTelemetryBar: React.FC<TopTelemetryBarProps> = ({
           />
           <span className="capitalize">{orbState}</span>
         </div>
+
+        {/* View Switcher Pill */}
+        {onViewChange && (
+          <div className="flex items-center rounded-lg bg-obsidian-950 p-0.5 border border-slate-800 text-xs font-mono ml-2">
+            <button
+              onClick={() => onViewChange('chat')}
+              className={`px-2.5 py-1 rounded-md transition flex items-center space-x-1.5 ${
+                currentView === 'chat'
+                  ? 'bg-cyan-950/90 border border-cyan-500/50 text-cyan-300 font-bold shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Terminal className="w-3.5 h-3.5" />
+              <span className="hidden md:inline">HUD Chat</span>
+            </button>
+            <button
+              onClick={() => onViewChange('dashboard')}
+              className={`px-2.5 py-1 rounded-md transition flex items-center space-x-1.5 ${
+                currentView === 'dashboard'
+                  ? 'bg-cyan-950/90 border border-cyan-500/50 text-cyan-300 font-bold shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <LayoutDashboard className="w-3.5 h-3.5" />
+              <span className="hidden md:inline">Dashboard</span>
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Live System Gauges */}

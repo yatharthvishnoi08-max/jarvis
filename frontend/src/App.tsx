@@ -12,11 +12,13 @@ import { AgentsView } from './components/views/AgentsView';
 import { MemoryView } from './components/views/MemoryView';
 import { SettingsView } from './components/views/SettingsView';
 import { SystemView } from './components/views/SystemView';
+import { DashboardView } from './components/views/DashboardView';
 
 export const App: React.FC = () => {
   const { isAuthenticated, isLoading, checkAuth } = useAuthStore();
   const { connectWebSocket, disconnectWebSocket, pendingApprovals } = useJarvisStore();
 
+  const [currentView, setCurrentView] = useState<'chat' | 'dashboard'>('chat');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
   const [agentsModalOpen, setAgentsModalOpen] = useState(false);
@@ -54,8 +56,9 @@ export const App: React.FC = () => {
 
   const handleMobileTabChange = (tab: MobileTab) => {
     setMobileTab(tab);
+    if (tab === 'chat') setCurrentView('chat');
+    if (tab === 'dashboard') setCurrentView('dashboard');
     if (tab === 'agents') setAgentsModalOpen(true);
-    if (tab === 'system') setSystemModalOpen(true);
     if (tab === 'settings') setSettingsModalOpen(true);
     if (tab === 'activity') setActivityOpen(true);
   };
@@ -66,6 +69,8 @@ export const App: React.FC = () => {
       <TopTelemetryBar
         onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
         onOpenSettings={() => setSettingsModalOpen(true)}
+        currentView={currentView}
+        onViewChange={setCurrentView}
       />
 
       {/* Main Multi-Panel Workspace */}
@@ -77,12 +82,25 @@ export const App: React.FC = () => {
           onOpenAgents={() => setAgentsModalOpen(true)}
           onOpenMemory={() => setMemoryModalOpen(true)}
           onOpenSettings={() => setSettingsModalOpen(true)}
+          currentView={currentView}
+          onViewChange={setCurrentView}
         />
 
-        {/* Central Chat & Voice HUD */}
+        {/* Central Deck: Toggle between HUD Chat and Mission Control Dashboard */}
         <main className="flex-1 flex flex-col h-full overflow-hidden bg-obsidian-950 relative">
-          <ChatArea />
-          <Composer />
+          {currentView === 'chat' ? (
+            <>
+              <ChatArea />
+              <Composer />
+            </>
+          ) : (
+            <DashboardView
+              onSwitchToChat={() => setCurrentView('chat')}
+              onOpenAgentsModal={() => setAgentsModalOpen(true)}
+              onOpenMemoryModal={() => setMemoryModalOpen(true)}
+              onOpenSettingsModal={() => setSettingsModalOpen(true)}
+            />
+          )}
         </main>
 
         {/* Right Activity & Approvals Panel (Desktop + Drawer) */}

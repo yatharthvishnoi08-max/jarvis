@@ -1,7 +1,7 @@
 import React from 'react';
-import { MessageSquare, Activity, Users, HardDrive, Settings } from 'lucide-react';
+import { MessageSquare, LayoutDashboard, Activity, Users, Settings } from 'lucide-react';
 
-export type MobileTab = 'chat' | 'activity' | 'agents' | 'system' | 'settings';
+export type MobileTab = 'chat' | 'dashboard' | 'activity' | 'agents' | 'settings';
 
 interface MobileNavProps {
   currentTab: MobileTab;
@@ -16,9 +16,9 @@ export const MobileNav: React.FC<MobileNavProps> = ({
 }) => {
   const tabs = [
     { id: 'chat', label: 'Chat', icon: MessageSquare },
+    { id: 'dashboard', label: 'Control', icon: LayoutDashboard },
     { id: 'activity', label: 'Activity', icon: Activity, badge: pendingApprovalsCount },
     { id: 'agents', label: 'Agents', icon: Users },
-    { id: 'system', label: 'System', icon: HardDrive },
     { id: 'settings', label: 'Settings', icon: Settings }
   ];
 
