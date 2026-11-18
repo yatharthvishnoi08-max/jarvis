@@ -2,7 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { useJarvisStore } from '../stores/useJarvisStore';
 import { useAudioStore } from '../stores/useAudioStore';
 import { JarvisOrb } from './JarvisOrb';
-import { Play, Square, Bot, User, Wrench, Sparkles } from 'lucide-react';
+import { Play, Square, Bot, User, Wrench, Sparkles, CalendarCheck } from 'lucide-react';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 
@@ -46,7 +46,7 @@ export const ChatArea: React.FC = () => {
           </div>
 
           {/* Quick Command Suggestions */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 w-full pt-2">
+          <div className="grid grid-cols-2 gap-2 w-full pt-2">
             <button
               onClick={() => sendMessage('Check my laptop system telemetry and available memory.')}
               disabled={!isConnected}
@@ -57,6 +57,18 @@ export const ChatArea: React.FC = () => {
                 <span>System Telemetry</span>
               </div>
               <div className="text-[11px] text-slate-500 mt-1">CPU, RAM, and Disk metrics</div>
+            </button>
+
+            <button
+              onClick={() => sendMessage('What tasks are overdue or due today in my planner?')}
+              disabled={!isConnected}
+              className="p-3 rounded-xl bg-obsidian-850 hover:bg-cyan-950/40 border border-slate-800 hover:border-cyan-500/40 text-left transition group disabled:opacity-40 disabled:pointer-events-none"
+            >
+              <div className="text-xs font-semibold text-cyan-400 flex items-center space-x-1.5 font-mono">
+                <CalendarCheck className="w-3.5 h-3.5" />
+                <span>My day</span>
+              </div>
+              <div className="text-[11px] text-slate-500 mt-1">Due today and overdue</div>
             </button>
 
             <button
