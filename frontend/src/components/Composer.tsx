@@ -4,6 +4,7 @@ import { Send, Mic, MicOff, Square, WifiOff, RotateCw } from 'lucide-react';
 
 export const Composer: React.FC = () => {
   const [text, setText] = useState('');
+  const [micHint, setMicHint] = useState('');
   const {
     sendMessage,
     orbState,
@@ -33,12 +34,13 @@ export const Composer: React.FC = () => {
       recognition.onresult = (event: any) => {
         const transcript = event.results[0][0].transcript;
         if (transcript) {
-          sendMessage(transcript);
+          if (!sendMessage(transcript)) setText(transcript);
         }
       };
 
       recognition.onerror = (event: any) => {
         console.warn('Speech recognition error:', event.error);
+        setMicHint('Could not hear you. Check microphone permission or use your keyboard’s dictation.');
         setIsListening(false);
       };
 
@@ -47,27 +49,36 @@ export const Composer: React.FC = () => {
       };
 
       recognitionRef.current = recognition;
+      return () => {
+        recognition.onresult = recognition.onstart = recognition.onerror = recognition.onend = null;
+        recognition.abort();
+        recognitionRef.current = null;
+      };
     }
   }, [setIsListening, sendMessage]);
 
   const toggleMic = () => {
-    if (!recognitionRef.current) {
-      alert('Speech recognition is not supported in this browser. Use Chrome, Edge, or Safari.');
+    setMicHint('');
+    if (!window.isSecureContext || !recognitionRef.current) {
+      setMicHint('Use your phone keyboard’s dictation, then tap Send. The in-app mic needs HTTPS and a supported browser.');
       return;
     }
 
     if (isListening) {
       recognitionRef.current.stop();
     } else {
-      recognitionRef.current.start();
+      try {
+        recognitionRef.current.start();
+      } catch {
+        setMicHint('Microphone unavailable. Use keyboard dictation or try again.');
+      }
     }
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!text.trim()) return;
-    sendMessage(text.trim());
-    setText('');
+    if (sendMessage(text.trim())) setText('');
   };
 
   const isBusy = orbState === 'thinking' || orbState === 'acting';
@@ -96,7 +107,7 @@ export const Composer: React.FC = () => {
         <button
           type="button"
           onClick={toggleMic}
-          disabled={!isConnected}
+          disabled={!isConnected || isBusy}
           className={`p-3 rounded-full border transition flex items-center justify-center shrink-0 shadow-lg ${
             isListening
               ? 'bg-red-950 border-red-500 text-red-400 animate-pulse'
@@ -146,6 +157,7 @@ export const Composer: React.FC = () => {
           </button>
         )}
       </form>
+      {micHint && <p role="status" className="max-w-3xl mx-auto mt-2 text-xs text-amber-200">{micHint}</p>}
     </div>
   );
 };

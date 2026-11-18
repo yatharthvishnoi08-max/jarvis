@@ -163,17 +163,24 @@ async def create_session(req: CreateSessionRequest, auth: bool = Depends(authent
 
 @app.get("/api/sessions/{session_id}")
 async def get_session(session_id: str, auth: bool = Depends(authenticate_request)):
-    sess = session_manager.get_or_create_session(session_id)
+    sess = session_manager.get_session(session_id)
+    if sess is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
     return {"id": sess.id, "title": sess.title, "messages": sess.messages}
 
 @app.delete("/api/sessions/{session_id}")
 async def delete_session(session_id: str, auth: bool = Depends(authenticate_request)):
+    sess = session_manager.get_session(session_id)
+    if sess and sess.turn_lock.locked():
+        raise HTTPException(status_code=409, detail="Wait for the current reply before deleting this chat.")
     success = session_manager.delete_session(session_id)
     return {"deleted": success}
 
 @app.post("/api/sessions/{session_id}/cancel")
 async def cancel_session(session_id: str, auth: bool = Depends(authenticate_request)):
-    sess = session_manager.get_or_create_session(session_id)
+    sess = session_manager.get_session(session_id)
+    if sess is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
     sess.cancel()
     approval_manager.cancel_session_approvals(session_id)
     audit_logger.log_event("SESSION_CANCELLED", session_id=session_id, action="cancel")
@@ -355,34 +362,41 @@ async def websocket_endpoint(websocket: WebSocket):
                     )
 
                 # Run ReAct in executor thread to prevent blocking
-                response_text = await agent.chat_async(
-                    session=session,
-                    user_input=text,
-                    on_thought=on_thought,
-                    on_tool_start=on_tool_start,
-                    on_tool_end=on_tool_end,
-                    on_approval_needed=on_approval_needed
-                )
+                async with session.turn_lock:
+                    response_text = await agent.chat_async(
+                        session=session, user_input=text, on_thought=on_thought,
+                        on_tool_start=on_tool_start, on_tool_end=on_tool_end,
+                        on_approval_needed=on_approval_needed
+                    )
+                    reply = session.messages[-1] if session.messages else {}
+                    if reply.get("role") != "assistant" or reply.get("tool_calls"):
+                        reply = session.add_message("assistant", response_text)
+                response = {"type": "response", "session_id": session.id,
+                            "message_id": reply["id"], "text": response_text}
+                text_first = data.get("text_first") is True
+                if text_first:
+                    await websocket.send_json(response)
 
-                # Generate unique ElevenLabs audio if requested
                 audio_meta = None
                 if wants_voice and speaker.api_key and not session.is_cancelled:
                     await websocket.send_json({"type": "audio_state", "state": "generating"})
                     audio_meta = await loop.run_in_executor(
                         None,
-                        lambda: speaker.generate_speech(response_text, session_id=session_id)
+                        lambda: speaker.generate_speech(response_text, session_id=session.id, message_id=reply["id"])
                     )
 
                 audio_id = audio_meta["audio_id"] if audio_meta else None
                 audio_url = f"/api/audio/{audio_id}" if audio_id else None
 
-                await websocket.send_json({
-                    "type": "response",
-                    "session_id": session_id,
-                    "text": response_text,
-                    "audio_id": audio_id,
-                    "audio_url": audio_url
-                })
+                if audio_id and session_manager.get_session(session.id) is session:
+                    reply["audio_id"] = audio_id
+                    session.save()
+                audio_fields = {"audio_id": audio_id, "audio_url": audio_url}
+                if not text_first:
+                    await websocket.send_json({**response, **audio_fields})
+                elif wants_voice and not session.is_cancelled:
+                    await websocket.send_json({"type": "reply_audio", "session_id": session.id,
+                                               "message_id": reply["id"], **audio_fields})
 
     except WebSocketDisconnect:
         pass

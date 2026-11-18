@@ -24,9 +24,9 @@ if errorlevel 1 (
 )
 
 pushd frontend
-if not exist node_modules (
+if not exist node_modules\dompurify\package.json (
   echo Installing interface dependencies...
-  call npm install
+  call npm ci
   if errorlevel 1 (
     popd
     echo Interface dependency installation failed.

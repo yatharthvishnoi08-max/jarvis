@@ -160,6 +160,7 @@ export const ChatArea: React.FC = () => {
               )}
 
               {/* Unique Audio Playback Control */}
+              {msg.voiceUnavailable && <p className="mt-2 text-xs text-amber-300">Voice unavailable for this reply.</p>}
               {msg.audio_id && (
                 <div className="mt-3 pt-2.5 border-t border-slate-800/60 flex items-center justify-between text-xs font-mono">
                   <div className="flex items-center space-x-2">
@@ -177,7 +178,7 @@ export const ChatArea: React.FC = () => {
                         className="px-2.5 py-1 rounded bg-cyan-950/80 border border-cyan-600/60 text-cyan-300 flex items-center space-x-1 hover:bg-cyan-900/60 transition"
                       >
                         <Play className="w-3 h-3 fill-cyan-300" />
-                        <span>Replay Voice</span>
+                        <span>Play reply</span>
                       </button>
                     )}
                     <span className="text-[10px] text-slate-500">{msg.audio_id}</span>
