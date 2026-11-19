@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { useAuthStore } from './stores/useAuthStore';
 import { useJarvisStore } from './stores/useJarvisStore';
-import { TopTelemetryBar } from './components/TopTelemetryBar';
+import { Activity, AudioLines, History, Monitor, ShieldAlert, Volume2, VolumeX } from 'lucide-react';
+import './conversation.css';
 import { LeftSidebar } from './components/LeftSidebar';
 import { ChatArea } from './components/ChatArea';
 import { Composer } from './components/Composer';
@@ -15,7 +16,8 @@ import { SystemView } from './components/views/SystemView';
 
 export const App: React.FC = () => {
   const { isAuthenticated, isLoading, checkAuth } = useAuthStore();
-  const { connectWebSocket, disconnectWebSocket, pendingApprovals } = useJarvisStore();
+  const { connectWebSocket, disconnectWebSocket, pendingApprovals, ws, voiceEnabled,
+    setVoiceEnabled, triggerEmergencyStop } = useJarvisStore();
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
@@ -61,35 +63,42 @@ export const App: React.FC = () => {
   };
 
   return (
-    <div className="h-screen w-screen flex flex-col bg-obsidian-950 text-slate-100 overflow-hidden relative">
+    <div className="jarvis-shell w-screen flex flex-col text-slate-100 overflow-hidden relative">
       {/* Top Telemetry & Controls Bar */}
-      <TopTelemetryBar
-        onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
-        onOpenSettings={() => setSettingsModalOpen(true)}
-      />
+      <header className="jarvis-bar">
+        <div className="jarvis-brand"><AudioLines aria-hidden="true"/> Jarvis</div>
+        <span className="link-state" data-online={ws?.readyState === WebSocket.OPEN}>{ws?.readyState === WebSocket.OPEN ? 'Connected' : 'Offline'}</span>
+        <nav aria-label="Workspace tools">
+          <button aria-label="History and settings" onClick={() => setSidebarOpen(true)}><History/><span>History</span></button>
+          <button aria-label="Voice replies" aria-pressed={voiceEnabled} onClick={() => setVoiceEnabled(!voiceEnabled)}>{voiceEnabled ? <Volume2/> : <VolumeX/>}</button>
+          <button aria-label="System telemetry" onClick={() => setSystemModalOpen(true)}><Monitor/></button>
+          <button aria-label={'Activity and approvals: ' + pendingApprovals.length} onClick={() => setActivityOpen(true)}><Activity/><span>Activity</span>{pendingApprovals.length || ''}</button>
+          <button aria-label="Emergency stop" title="Emergency stop" onClick={triggerEmergencyStop}><ShieldAlert/></button>
+        </nav>
+      </header>
 
       {/* Main Multi-Panel Workspace */}
       <div className="flex-1 flex overflow-hidden relative">
         {/* Left Navigation Sidebar (Desktop + Drawer) */}
-        <LeftSidebar
+        {sidebarOpen && <LeftSidebar
           isOpen={sidebarOpen}
           onClose={() => setSidebarOpen(false)}
           onOpenAgents={() => setAgentsModalOpen(true)}
           onOpenMemory={() => setMemoryModalOpen(true)}
           onOpenSettings={() => setSettingsModalOpen(true)}
-        />
+        />}
 
         {/* Central Chat & Voice HUD */}
-        <main className="flex-1 flex flex-col h-full overflow-hidden bg-obsidian-950 relative">
+        <main className="flex-1 flex flex-col h-full overflow-hidden relative">
           <ChatArea />
           <Composer />
         </main>
 
         {/* Right Activity & Approvals Panel (Desktop + Drawer) */}
-        <RightActivityPanel
+        {activityOpen && <RightActivityPanel
           isOpen={activityOpen}
           onClose={() => setActivityOpen(false)}
-        />
+        />}
       </div>
 
       {/* Mobile Bottom Navigation */}

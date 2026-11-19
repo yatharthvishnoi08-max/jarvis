@@ -4,7 +4,8 @@ import { Send, Mic, MicOff, Square } from 'lucide-react';
 
 export const Composer: React.FC = () => {
   const [text, setText] = useState('');
-  const { sendMessage, orbState, cancelSession, isListening, setIsListening } = useJarvisStore();
+  const { sendMessage, orbState, cancelSession, isListening, setIsListening, ws, pendingApprovals } = useJarvisStore();
+  const online = ws?.readyState === WebSocket.OPEN;
   const recognitionRef = useRef<any>(null);
 
   useEffect(() => {
@@ -25,7 +26,7 @@ export const Composer: React.FC = () => {
       recognition.onresult = (event: any) => {
         const transcript = event.results[0][0].transcript;
         if (transcript) {
-          sendMessage(transcript);
+          if (!sendMessage(transcript)) setText(transcript);
         }
       };
 
@@ -39,6 +40,10 @@ export const Composer: React.FC = () => {
       };
 
       recognitionRef.current = recognition;
+      return () => {
+        recognition.onresult = recognition.onerror = recognition.onend = recognition.onstart = null;
+        recognition.abort();
+      };
     }
   }, [setIsListening, sendMessage]);
 
@@ -58,19 +63,20 @@ export const Composer: React.FC = () => {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!text.trim()) return;
-    sendMessage(text.trim());
-    setText('');
+    if (sendMessage(text.trim())) setText('');
   };
 
   const isBusy = orbState === 'thinking' || orbState === 'acting';
 
   return (
-    <div className="p-3 sm:p-4 bg-obsidian-900/90 border-t border-slate-800/80 backdrop-blur-md">
+    <div className="jarvis-composer">
+      {!online && <p role="status">Gateway offline. You can keep typing while Jarvis reconnects.</p>}
       <form onSubmit={handleSubmit} className="max-w-3xl mx-auto flex items-center space-x-2">
         {/* Microphone Button */}
         <button
           type="button"
           onClick={toggleMic}
+          disabled={!online || isBusy || pendingApprovals.length > 0}
           className={`p-3 rounded-full border transition flex items-center justify-center shrink-0 shadow-lg ${
             isListening
               ? 'bg-red-950 border-red-500 text-red-400 animate-pulse'
@@ -85,12 +91,13 @@ export const Composer: React.FC = () => {
         <div className="flex-1 relative">
           <input
             type="text"
+            aria-label="Message Jarvis"
             value={text}
             onChange={(e) => setText(e.target.value)}
             placeholder={
               isListening
                 ? 'Listening to your voice... Speak now.'
-                : 'Message JARVIS, run a system tool, or coach an employee...'
+                : 'Message Jarvis…'
             }
             className="w-full bg-obsidian-850/90 border border-slate-800 rounded-full px-4 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500/70 transition"
           />
@@ -109,7 +116,7 @@ export const Composer: React.FC = () => {
         ) : (
           <button
             type="submit"
-            disabled={!text.trim()}
+            disabled={!online || !text.trim() || pendingApprovals.length > 0}
             className="p-2.5 rounded-full bg-jarvis-cyan text-obsidian-950 hover:bg-cyan-400 disabled:opacity-30 disabled:pointer-events-none active:scale-95 transition flex items-center justify-center shrink-0 font-bold"
             title="Send"
           >

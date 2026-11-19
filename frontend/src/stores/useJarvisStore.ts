@@ -27,7 +27,7 @@ interface JarvisState {
   createSession: (title?: string) => Promise<string>;
   switchSession: (sessionId: string) => Promise<void>;
   deleteSession: (sessionId: string) => Promise<void>;
-  sendMessage: (text: string) => void;
+  sendMessage: (text: string) => boolean;
   decideApproval: (requestId: string, decision: 'approve' | 'reject') => Promise<void>;
   cancelSession: () => Promise<void>;
   triggerEmergencyStop: () => Promise<void>;
@@ -272,9 +272,9 @@ export const useJarvisStore = create<JarvisState>((set, get) => {
     sendMessage: (text: string) => {
       const socket = get().ws;
       const sessionId = get().currentSessionId;
-      if (!socket || socket.readyState !== WebSocket.OPEN) {
-        console.error('WebSocket is not open.');
-        return;
+      if (!socket || socket.readyState !== WebSocket.OPEN || get().pendingApprovals.length ||
+          ['thinking', 'acting'].includes(get().orbState)) {
+        return false;
       }
 
       // Add user message to UI immediately
@@ -284,19 +284,16 @@ export const useJarvisStore = create<JarvisState>((set, get) => {
         content: text,
         timestamp: Math.floor(Date.now() / 1000)
       };
-      set((state) => ({
-        messages: [...state.messages, userMsg],
-        orbState: 'thinking'
-      }));
-
-      socket.send(
+      try { socket.send(
         JSON.stringify({
           type: 'chat',
           session_id: sessionId,
           text: text,
           voice: get().voiceEnabled
         })
-      );
+      ); } catch { return false; }
+      set((state) => ({ messages: [...state.messages, userMsg], orbState: 'thinking' }));
+      return true;
     },
 
     decideApproval: async (requestId: string, decision: 'approve' | 'reject') => {
