@@ -2,8 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useJarvisStore } from '../stores/useJarvisStore';
 import { Send, Mic, MicOff, Square } from 'lucide-react';
 
-export const Composer: React.FC = () => {
-  const [text, setText] = useState('');
+export const Composer: React.FC<{text:string;setText:(value:string)=>void}> = ({text,setText}) => {
   const { sendMessage, orbState, cancelSession, isListening, setIsListening, ws, pendingApprovals } = useJarvisStore();
   const online = ws?.readyState === WebSocket.OPEN;
   const recognitionRef = useRef<any>(null);
@@ -97,7 +96,7 @@ export const Composer: React.FC = () => {
             placeholder={
               isListening
                 ? 'Listening to your voice... Speak now.'
-                : 'Message Jarvis…'
+                : 'Type to Jarvis while you talk…'
             }
             className="w-full bg-obsidian-850/90 border border-slate-800 rounded-full px-4 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500/70 transition"
           />
