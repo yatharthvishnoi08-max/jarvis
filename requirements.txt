@@ -18,3 +18,6 @@ pypdf>=5.0.0
 croniter>=2.0.0
 wisprflow-sdk>=0.1.3
 faster-whisper>=1.0.0
+pywebview>=6.2.0
+pythonnet>=3.0.0
+Pillow>=13.0.0
