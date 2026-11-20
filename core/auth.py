@@ -53,6 +53,11 @@ def redact_secrets(text: str) -> str:
     text = re.sub(r"Bearer\s+[a-zA-Z0-9_\-\.]{20,}", "Bearer [REDACTED_TOKEN]", text)
     return text
 
+def is_auth_required() -> bool:
+    """Returns False if authentication is disabled (local/personal mode)."""
+    val = os.getenv("REQUIRE_AUTH", "false").strip().lower()
+    return val in ("true", "1", "yes", "on")
+
 def verify_token(provided_token: Optional[str]) -> bool:
     """Constant-time token verification to prevent timing attacks."""
     current_token = os.getenv("JARVIS_AUTH_TOKEN", OWNER_TOKEN).strip()

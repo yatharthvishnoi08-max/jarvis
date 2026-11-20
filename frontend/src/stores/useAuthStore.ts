@@ -15,7 +15,6 @@ const getInitialToken = () => {
     const urlParam = new URLSearchParams(window.location.search).get('token');
     if (urlParam) {
       localStorage.setItem('jarvis_auth_token', urlParam.trim());
-      // Clean query string from browser address bar
       window.history.replaceState({}, document.title, window.location.pathname);
       return urlParam.trim();
     }
@@ -41,12 +40,30 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   checkAuth: async () => {
-    const token = get().token;
+    let token = get().token;
+
+    // 1. Check if backend requires authentication (seamless local mode)
+    try {
+      const statusRes = await fetch('/api/auth/status');
+      if (statusRes.ok) {
+        const data = await statusRes.json();
+        if (!data.auth_required) {
+          const autoToken = data.token || token || 'local-owner';
+          localStorage.setItem('jarvis_auth_token', autoToken);
+          set({ token: autoToken, isAuthenticated: true, isLoading: false, error: null });
+          return true;
+        }
+      }
+    } catch {
+      // Backend status unreachable; fall back to local token verification
+    }
+
     if (!token) {
       set({ isAuthenticated: false, isLoading: false });
       return false;
     }
 
+    // 2. If auth is required, verify token
     try {
       const res = await fetch('/api/auth/verify', {
         headers: { Authorization: `Bearer ${token}` }
@@ -59,7 +76,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         set({ isAuthenticated: false, isLoading: false, error: 'Invalid or expired token.' });
         return false;
       }
-    } catch (err) {
+    } catch {
       set({ isAuthenticated: false, isLoading: false, error: 'Cannot reach JARVIS server.' });
       return false;
     }

@@ -22,7 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 
-from core.auth import verify_token, redact_secrets, global_rate_limiter, OWNER_TOKEN
+from core.auth import verify_token, redact_secrets, global_rate_limiter, OWNER_TOKEN, is_auth_required
 from core.audit import audit_logger
 from core.approvals import approval_manager
 from core.session import session_manager, Session
@@ -66,6 +66,8 @@ speaker = ElevenLabsSpeaker()
 security = HTTPBearer(auto_error=False)
 
 def authenticate_request(credentials: Optional[HTTPAuthorizationCredentials] = Security(security)) -> bool:
+    if not is_auth_required():
+        return True
     if not credentials or not verify_token(credentials.credentials):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -109,9 +111,24 @@ def get_lan_and_tailscale_ips() -> Dict[str, List[str]]:
 
 # ----------------- REST ENDPOINTS -----------------
 
+@app.get("/api/auth/status")
+async def get_auth_status():
+    """Public endpoint returning whether authentication is required for this gateway."""
+    required = is_auth_required()
+    return {
+        "auth_required": required,
+        "token": OWNER_TOKEN if not required else None
+    }
+
 @app.get("/api/auth/verify")
 async def verify_auth(auth: bool = Depends(authenticate_request)):
-    return {"status": "authenticated", "role": "owner"}
+    required = is_auth_required()
+    return {
+        "status": "authenticated",
+        "role": "owner",
+        "auth_required": required,
+        "token": OWNER_TOKEN if not required else None
+    }
 
 class LoginRequest(BaseModel):
     token: str
@@ -325,7 +342,7 @@ async def websocket_endpoint(websocket: WebSocket):
     # Verify auth token before accepting the socket. A rejected handshake is
     # clearer to clients and avoids accidentally accepting the same socket twice.
     token = websocket.query_params.get("token")
-    if not token or not verify_token(token):
+    if is_auth_required() and (not token or not verify_token(token)):
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Unauthorized")
         return
 
