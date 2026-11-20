@@ -23,6 +23,17 @@ from tools.system_tools import (
     write_file,
     list_directory,
     get_system_stats,
+    get_battery_status,
+    get_clipboard,
+    set_clipboard,
+    control_media,
+    manage_application,
+    find_files,
+)
+from tools.multimodal_tools import (
+    analyze_image,
+    capture_screen,
+    analyze_screen,
 )
 from tools.meta_tools import (
     list_employees,
@@ -100,6 +111,17 @@ TOOL_FUNCTIONS = {
     # Skills
     "list_skills": _list_skills,
     "inspect_skill": _inspect_skill,
+    # Multimodal & Vision
+    "analyze_image": analyze_image,
+    "capture_screen": capture_screen,
+    "analyze_screen": analyze_screen,
+    # Host Environment & System Control
+    "get_battery_status": get_battery_status,
+    "get_clipboard": get_clipboard,
+    "set_clipboard": set_clipboard,
+    "control_media": control_media,
+    "manage_application": manage_application,
+    "find_files": find_files,
 }
 
 TOOL_SCHEMAS = [
@@ -435,6 +457,142 @@ TOOL_SCHEMAS = [
                 "required": ["skill_name"]
             }
         }
+    },
+    # 25. analyze_image
+    {
+        "type": "function",
+        "function": {
+            "name": "analyze_image",
+            "description": "Analyze any local image file (PNG, JPG, WebP) using Gemini Vision to read text, describe diagrams, inspect charts, or debug screenshots.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "image_path": {"type": "string", "description": "Absolute or relative path to the image file on disk."},
+                    "prompt": {"type": "string", "description": "Specific question or analysis prompt for Gemini Vision (optional)."}
+                },
+                "required": ["image_path"]
+            }
+        }
+    },
+    # 26. capture_screen
+    {
+        "type": "function",
+        "function": {
+            "name": "capture_screen",
+            "description": "Capture a screenshot of the primary computer display and save it to disk.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "save_path": {"type": "string", "description": "Optional custom file path to save the screenshot."}
+                }
+            }
+        }
+    },
+    # 27. analyze_screen
+    {
+        "type": "function",
+        "function": {
+            "name": "analyze_screen",
+            "description": "Capture the user's active screen and analyze it with Gemini Vision to see what is on screen, debug UI errors, and provide visual assistance.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prompt": {"type": "string", "description": "Question or focus area for visual analysis (optional)."}
+                }
+            }
+        }
+    },
+    # 28. get_battery_status
+    {
+        "type": "function",
+        "function": {
+            "name": "get_battery_status",
+            "description": "Returns current host battery percentage, AC power plug status, and estimated remaining runtime.",
+            "parameters": {"type": "object", "properties": {}}
+        }
+    },
+    # 29. get_clipboard
+    {
+        "type": "function",
+        "function": {
+            "name": "get_clipboard",
+            "description": "Reads and returns the current text stored in the Windows clipboard.",
+            "parameters": {"type": "object", "properties": {}}
+        }
+    },
+    # 30. set_clipboard
+    {
+        "type": "function",
+        "function": {
+            "name": "set_clipboard",
+            "description": "Copies text directly into the Windows clipboard for the user.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string", "description": "Text content to copy to the clipboard."}
+                },
+                "required": ["text"]
+            }
+        }
+    },
+    # 31. control_media
+    {
+        "type": "function",
+        "function": {
+            "name": "control_media",
+            "description": "Control host media playback and master volume (volume_up, volume_down, mute, unmute, play_pause, next_track, prev_track).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["volume_up", "volume_down", "mute", "unmute", "play_pause", "next_track", "prev_track"],
+                        "description": "Media action to execute."
+                    }
+                },
+                "required": ["action"]
+            }
+        }
+    },
+    # 32. manage_application
+    {
+        "type": "function",
+        "function": {
+            "name": "manage_application",
+            "description": "Launch, list, or close Windows desktop applications.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["launch", "close", "list"],
+                        "description": "Action: 'launch' to start an app, 'close' to terminate, 'list' to view active apps."
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "Name or executable of the application (e.g. 'notepad', 'calc', 'code', 'chrome'). Required for 'launch' and 'close'."
+                    }
+                },
+                "required": ["action"]
+            }
+        }
+    },
+    # 33. find_files
+    {
+        "type": "function",
+        "function": {
+            "name": "find_files",
+            "description": "Search for files by pattern or substring across directories, ignoring build artifacts.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "pattern": {"type": "string", "description": "Search pattern or filename (e.g. '*.ico', 'budget', '*.py')."},
+                    "search_path": {"type": "string", "description": "Root path to search from (default is project root '.')."},
+                    "max_results": {"type": "integer", "description": "Maximum number of results to return (default 15)."}
+                },
+                "required": ["pattern"]
+            }
+        }
     }
 ]
 
@@ -550,9 +708,10 @@ class JarvisAgent:
 
                 return final_content
 
-            # Format tool calls
-            formatted_tool_calls = [
-                {
+            # Format tool calls (preserving provider-specific fields like Google thought signatures)
+            formatted_tool_calls = []
+            for tc in message.tool_calls:
+                tc_dict = {
                     "id": tc.id,
                     "type": "function",
                     "function": {
@@ -560,8 +719,13 @@ class JarvisAgent:
                         "arguments": tc.function.arguments
                     }
                 }
-                for tc in message.tool_calls
-            ]
+                if hasattr(tc, "extra_content") and tc.extra_content:
+                    tc_dict["extra_content"] = tc.extra_content
+                elif hasattr(tc, "model_dump"):
+                    dumped = tc.model_dump(exclude_unset=True)
+                    if "extra_content" in dumped:
+                        tc_dict["extra_content"] = dumped["extra_content"]
+                formatted_tool_calls.append(tc_dict)
 
             assistant_content = redact_secrets(message.content or "")
             if assistant_content:

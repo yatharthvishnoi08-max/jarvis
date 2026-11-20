@@ -59,10 +59,23 @@ def classify_tool_call(tool_name: str, args: Dict[str, Any]) -> Tuple[str, str]:
         "read_employee_sop", "read_memory", "web_search", "fetch_web_page",
         "calculator", "read_pdf", "get_weather", "git_status", "git_diff",
         "git_log", "list_skills", "inspect_skill", "read_skill", "generate_morning_digest",
-        "run_deep_research"
+        "run_deep_research", "analyze_image", "analyze_screen", "capture_screen",
+        "get_battery_status", "get_clipboard", "set_clipboard", "control_media", "find_files"
     ]
     if tool_name in read_tools:
         return POLICY_READ, f"Read-only query / inspection via '{tool_name}'."
+
+    # 1.1 Manage applications
+    if tool_name == "manage_application":
+        act = args.get("action", "").lower().strip()
+        name = args.get("name", "")
+        if act == "list":
+            return POLICY_READ, "List active running applications."
+        elif act == "launch":
+            return POLICY_READ, f"Launch application '{name}'."
+        elif act == "close":
+            return POLICY_CONFIRM, f"Terminate process / application '{name}'."
+        return POLICY_CONFIRM, f"Application action '{act}'."
 
     # 2. PowerShell analysis
     if tool_name == "execute_powershell":
