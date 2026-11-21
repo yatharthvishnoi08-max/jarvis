@@ -531,6 +531,45 @@ async def websocket_endpoint(websocket: WebSocket):
 
     await websocket.accept()
     loop = asyncio.get_event_loop()
+    active_tasks = {}
+    active_turns = {}
+    disconnected = False
+    send_lock = asyncio.Lock()
+
+    async def send_event(event):
+        if disconnected:
+            return
+        try:
+            async with send_lock:
+                await websocket.send_json(event)
+        except (WebSocketDisconnect, RuntimeError, OSError):
+            # A closed tab must not make a completed turn fail to persist.
+            pass
+
+    async def run_turn(sess, operation):
+        try:
+            await operation
+        except ModelConfigurationError:
+            await send_event({"type": "error", "session_id": sess.id,
+                              "message": "Configure a model provider on the Jarvis host, then retry."})
+        except (asyncio.TimeoutError, APITimeoutError):
+            await send_event({"type": "error", "session_id": sess.id,
+                              "message": "The model took too long. Please try again."})
+        except APIStatusError as exc:
+            hints = {401: "Check the model API key on the host.",
+                     403: "Check access to the configured model.",
+                     404: "Check the configured model name.",
+                     402: "The provider could not serve this request within the available allowance.",
+                     429: "The model is busy or its allowance is exhausted. Try again later."}
+            await send_event({"type": "error", "session_id": sess.id,
+                              "message": hints.get(exc.status_code, "The model provider rejected this request. Please retry.")})
+        except Exception:
+            # Do not send provider payloads, prompts or credentials to logs/the UI.
+            await send_event({"type": "error", "session_id": sess.id,
+                              "message": "Jarvis could not complete this message. Check the host connection and storage, then retry."})
+        finally:
+            if active_turns.get(sess.id) is asyncio.current_task():
+                active_turns.pop(sess.id, None)
 
     try:
         while True:
@@ -539,10 +578,10 @@ async def websocket_endpoint(websocket: WebSocket):
             msg_type = data.get("type")
 
             if msg_type == "ping":
-                await websocket.send_json({"type": "pong", "time": int(time.time())})
+                await send_event({"type": "pong", "time": int(time.time())})
 
             elif msg_type == "get_telemetry":
-                await websocket.send_json({
+                await send_event({
                     "type": "telemetry",
                     "cpu_percent": psutil.cpu_percent(),
                     "ram_percent": psutil.virtual_memory().percent
@@ -552,14 +591,14 @@ async def websocket_endpoint(websocket: WebSocket):
                 req_id = data.get("request_id")
                 decision = data.get("decision", "reject")
                 approval_manager.decide(req_id, decision)
-                await websocket.send_json({"type": "approval_acknowledged", "request_id": req_id, "decision": decision})
+                await send_event({"type": "approval_acknowledged", "request_id": req_id, "decision": decision})
 
             elif msg_type == "cancel":
                 sess_id = data.get("session_id", "default")
                 sess = session_manager.get_or_create_session(sess_id)
                 sess.cancel()
                 approval_manager.cancel_session_approvals(sess_id)
-                await websocket.send_json({"type": "task_cancelled", "session_id": sess_id})
+                await send_event({"type": "task_cancelled", "session_id": sess_id})
 
             elif msg_type == "chat":
                 session_id = data.get("session_id", "default")
@@ -571,12 +610,16 @@ async def websocket_endpoint(websocket: WebSocket):
                     continue
 
                 session = session_manager.get_or_create_session(session_id)
+                if session.turn_lock.locked() or session_id in active_turns:
+                    await send_event({"type": "error", "session_id": session_id,
+                                      "message": "Jarvis is still finishing this conversation's previous task. Wait for it or stop it before retrying."})
+                    continue
 
                 async def process_chat(sess, user_text, voice, send_text_first):
                     # Callbacks for streaming events to the UI
                     def on_thought(thought_text):
                         asyncio.run_coroutine_threadsafe(
-                            websocket.send_json({
+                            send_event({
                                 "type": "thought",
                                 "session_id": sess.id,
                                 "text": thought_text
@@ -586,7 +629,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
                     def on_tool_start(fn_name, args):
                         asyncio.run_coroutine_threadsafe(
-                            websocket.send_json({
+                            send_event({
                                 "type": "tool_start",
                                 "session_id": sess.id,
                                 "tool": fn_name,
@@ -597,7 +640,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
                     def on_tool_end(fn_name, result):
                         asyncio.run_coroutine_threadsafe(
-                            websocket.send_json({
+                            send_event({
                                 "type": "tool_end",
                                 "session_id": sess.id,
                                 "tool": fn_name,
@@ -608,7 +651,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
                     def on_approval_needed(req_dict):
                         asyncio.run_coroutine_threadsafe(
-                            websocket.send_json({
+                            send_event({
                                 "type": "approval_required",
                                 "session_id": sess.id,
                                 "request": req_dict
@@ -618,6 +661,8 @@ async def websocket_endpoint(websocket: WebSocket):
 
                     # Run ReAct in executor thread to prevent blocking
                     async with sess.turn_lock:
+                        if disconnected:
+                            return
                         response_text = await agent.chat_async(
                             session=sess, user_input=user_text, on_thought=on_thought,
                             on_tool_start=on_tool_start, on_tool_end=on_tool_end,
@@ -626,18 +671,24 @@ async def websocket_endpoint(websocket: WebSocket):
                         reply = sess.messages[-1] if sess.messages else {}
                         if reply.get("role") != "assistant" or reply.get("tool_calls"):
                             reply = sess.add_message("assistant", response_text)
+                    # Speech synthesis must not block the next text turn.
+                    active_turns.pop(sess.id, None)
                     response = {"type": "response", "session_id": sess.id,
                                 "message_id": reply["id"], "text": response_text}
                     if send_text_first:
-                        await websocket.send_json(response)
+                        await send_event(response)
 
                     audio_meta = None
                     if voice and speaker.api_key and not sess.is_cancelled:
-                        await websocket.send_json({"type": "audio_state", "state": "generating"})
-                        audio_meta = await loop.run_in_executor(
-                            None,
-                            lambda: speaker.generate_speech(response_text, session_id=sess.id, message_id=reply["id"])
-                        )
+                        await send_event({"type": "audio_state", "state": "generating"})
+                        try:
+                            audio_meta = await loop.run_in_executor(
+                                None,
+                                lambda: speaker.generate_speech(response_text, session_id=sess.id, message_id=reply["id"])
+                            )
+                        except Exception:
+                            # Preserve the text reply even if speech generation fails.
+                            audio_meta = None
 
                     audio_id = audio_meta["audio_id"] if audio_meta else None
                     audio_url = f"/api/audio/{audio_id}" if audio_id else None
@@ -647,28 +698,42 @@ async def websocket_endpoint(websocket: WebSocket):
                         sess.save()
                     audio_fields = {"audio_id": audio_id, "audio_url": audio_url}
                     if not send_text_first:
-                        await websocket.send_json({**response, **audio_fields})
+                        await send_event({**response, **audio_fields})
                     elif voice and not sess.is_cancelled:
-                        await websocket.send_json({"type": "reply_audio", "session_id": sess.id,
+                        await send_event({"type": "reply_audio", "session_id": sess.id,
                                                    "message_id": reply["id"], **audio_fields})
 
                 # Spawn as a background task on the loop so the websocket receive loop stays unblocked
                 # to process approval decisions, cancellations, and pings concurrently.
-                asyncio.create_task(process_chat(session, text, wants_voice, text_first))
+                task = asyncio.create_task(run_turn(session, process_chat(session, text, wants_voice, text_first)))
+                active_tasks[task] = session
+                active_turns[session.id] = task
+                task.add_done_callback(lambda finished: active_tasks.pop(finished, None))
 
     except WebSocketDisconnect:
         pass
-    except Exception as e:
-        safe_error = redact_secrets(str(e))
-        print(f"[WebSocket Error]: {safe_error}")
+    except Exception:
         try:
-            await websocket.send_json({
+            await send_event({
                 "type": "error",
                 "message": "JARVIS hit an internal error. Check the gateway console for details."
             })
             await websocket.close(code=1011, reason="Internal server error")
         except Exception:
             pass
+
+    finally:
+        disconnected = True
+        tasks = list(active_tasks)
+        for task in list(active_turns.values()):
+            sess = active_tasks.get(task)
+            if sess is not None:
+                sess.cancel()
+                approval_manager.cancel_session_approvals(sess.id)
+        # Cooperative cancellation preserves the session lock until a running OS
+        # tool returns. Cancelling its asyncio wrapper cannot stop its OS thread.
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
 # ----------------- STATIC PWA SERVING -----------------
 
