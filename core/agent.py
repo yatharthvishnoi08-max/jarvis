@@ -884,6 +884,15 @@ TOOL_SCHEMAS = [
     }
 ]
 
+def reasoning_turn_limit() -> int:
+    """Allow longer workflows without an invalid or unbounded host setting."""
+    try:
+        value = int(os.getenv("MAX_TURNS", "30"))
+    except ValueError:
+        return 30
+    return max(1, min(value, 60))
+
+
 class JarvisAgent:
     def __init__(self):
         self.model_name = model_name()
@@ -946,7 +955,7 @@ class JarvisAgent:
         messages = [{"role": "system", "content": self.build_system_prompt(user_input, recent_context)}]
         messages.extend(session.model_history())
 
-        max_turns = int(os.getenv("MAX_TURNS", "30"))
+        max_turns = reasoning_turn_limit()
         loop = asyncio.get_event_loop()
 
         for turn in range(max_turns):

@@ -69,3 +69,26 @@ def test_app_alias_is_used_for_launch(monkeypatch):
     monkeypatch.setattr(computer.subprocess, 'Popen', launch)
     assert computer.open_app('calculator').startswith('SUCCESS:')
     assert '"calc"' in launch.call_args.args[0]
+
+
+@pytest.mark.parametrize('reason', ['Window input activation was interrupted (FailSafeException).',
+                                  'ERROR: Operation cancelled by user.',
+                                  'Foreground changed before input activation.'])
+def test_launch_never_retries_interrupted_input(monkeypatch, reason):
+    from tools import computer_use_tools as computer
+    monkeypatch.setattr(computer, 'is_desktop_available', lambda: (True, 'OK'))
+    monkeypatch.setattr(computer, '_bring_app_window_to_foreground', lambda *a, **kw: True)
+    monkeypatch.setattr(computer, 'verify_foreground_window', lambda _: (True, 'OK'))
+    activation = Mock(side_effect=[(False, reason), (True, 'OK')])
+    monkeypatch.setattr(computer, '_activate_window_input', activation)
+    monkeypatch.setattr(computer.subprocess, 'Popen', Mock())
+    assert reason in computer.open_app('calculator')
+    activation.assert_called_once()
+
+
+@pytest.mark.parametrize('value,expected', [('30', 30), ('15', 15), ('', 30), ('invalid', 30),
+                                         ('0', 1), ('-4', 1), ('10000000', 60)])
+def test_reasoning_budget_is_valid_and_bounded(monkeypatch, value, expected):
+    from core.agent import reasoning_turn_limit
+    monkeypatch.setenv('MAX_TURNS', value)
+    assert reasoning_turn_limit() == expected
