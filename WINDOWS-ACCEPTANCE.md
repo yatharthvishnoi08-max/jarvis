@@ -19,7 +19,7 @@
 | **Emergency Stop & Cooperative Cancellation** | **PASS** | Verified live across both cancellation modes: (1) **Pre-action turn cancellation** (Session `c2a6488e`) cleanly halted before tool dispatch; (2) **Live mid-typing cooperative cancellation** (Session `6cd11571`) interrupted `keyboard_type` at character 329 of 1885, suppressed trailing Enter, returned immediately to `"Ready to talk"`, and follow-up chat succeeded. |
 | **Planner & Deduplication** | **PASS** | SQLite-backed shared planner (`tools/planner.py`). Reconciled 5 unique dated tasks across multi-document updates, verified idempotent duplicate rejection on re-add ("Already on your list as #..."), and completed test-created task IDs cleanly. |
 | **Memory Engine** | **PASS** | Bounded local keyword recall (BM25), pinned core preferences, context budget cap (5,000 chars), SQLite memory cards with optimistic versioning. End-to-end lifecycle verified via owner UI: card #13 created (v1 violet/Thursday), edited (v2 amber/Tuesday), tested in recall preview (MAVEN-482 matched, unrelated piano query excluded), and archived (fresh session returned "unknown"). Note: Verifies bounded local keyword recall and lifecycle; does not establish semantic/vector retrieval. |
-| **Voice Synthesis, Wake Word & Interruption** | **PASS (CODE/UI) / PENDING (PHYSICAL)** | Continuous voice loop (`fa1e9c3`), status strip transitions (`09e8102`), browser 'Hey Jarvis' standby toggle with 45s idle fallback (`cce85cf`), auto-open Talk from Network/Planner (`d4bda0a`), and same-tab mic lock queue/release (`4af4020`) verified in code and browser DOM. Unit/integration suites passing (125 pytest, 13 voice TAP tests). Owner personally confirmed header `wake-2026.11.21.1` and "Say Hey Jarvis" active in normal Chrome/Edge. **PENDING OWNER TRIAL (PHYSICAL)**: Physical spoken trial ("Hey Jarvis, tell me a short story" and "Hey Jarvis, stop" barge-in) pending owner live test. Not marked passed yet. |
+| **Voice Synthesis, Wake Word & Interruption** | **PARTIAL (INTERRUPT FAILED)** | Continuous voice loop (`fa1e9c3`), status strip transitions (`09e8102`), browser 'Hey Jarvis' standby toggle with 45s idle fallback (`cce85cf`), auto-open Talk from Network/Planner (`d4bda0a`), and same-tab mic lock queue/release (`4af4020`) verified in code and browser DOM. Unit/integration suites passing (125 pytest, 13 voice TAP tests). **Owner Physical Trial Result**: Physical wake activation and spoken reply are **OWNER-VERIFIED PASS** ("Hey Jarvis" wakes and answers). Spoken interruption is **FAILED** ("Hey Jarvis stop" during speech playback does not halt audio, and no live transcript appears during playback; Web Speech recognition is blocked/suppressed while output audio plays on Windows). Awaiting shared echo-cancelled `getUserMedia` acoustic detection patch from Mac. |
 | **Google Workspace Connector** | **BLOCKED** | Read-only Gmail/Calendar client configured in Google Cloud project `nice-proposal-515406-b2`. **Blocked / Paused**: Requires human interactive OAuth consent on Windows host (`~/.config/jarvis/google-desktop.json`). |
 
 ---
@@ -271,19 +271,20 @@ Tested live through the deployed UI on `http://localhost:8000/` in a fresh conve
 - **Owner Confirmation in Normal Chrome/Edge**: The owner personally confirmed seeing header `wake-2026.11.21.1` and the active prompt `"Say Hey Jarvis"`.
 - **Verified UI Screenshot**: [wake_runtime_verified.png](file:///C:/Users/asha0/.gemini/antigravity/brain/10f936d3-63ca-470e-8451-1aa2cc7f0aef/wake_runtime_verified.png).
 
-### D. Verification Blockers & Physical Wake/Interruption Status
-1. **Window Focus Observation**:
-   - The owner's Google Chrome window was active in the foreground (`Activity | OpenRouter - Google Chrome`). Per user instructions and OS `SetForegroundWindow` protections, background automation ceased competing for focus.
-2. **Correction of Disk Cache Assumption**:
-   - The earlier hypothesis that the owner was viewing stale bundle `index-VJ5v9afZ.js` was an inference from disk files; vision analysis confirmed OpenRouter was the active page. That claim is corrected as unverified.
-3. **Physical Wake & Interruption Status: PENDING / UNVERIFIED**:
-   - All synthetic SAPI loopback and competing audio/focus automation have been halted to leave a clean environment for the owner's live spoken test.
-   - Physical acoustic wake word ("Hey Jarvis, tell me a short story") and playback barge-in ("Hey Jarvis, stop") remain **PENDING OWNER TRIAL** and are explicitly **NOT MARKED PASSED**.
+### D. Owner Physical Trial Findings: Wake Verified, Interruption FAILED
+1. **Physical Wake Word & Spoken Response**: **OWNER-VERIFIED PASS**.
+   - The owner tested on the live Windows laptop in normal Chrome/Edge: Jarvis reliably wakes on "Hey Jarvis" and answers spoken queries.
+2. **Physical Speech Interruption (Barge-in)**: **FAILED** (Recorded as FAILED, not merely unverified).
+   - The owner tested "Hey Jarvis, stop" while speech playback was active.
+   - Result: Playback did not halt, and no live interim transcript appeared in the UI during playback.
+   - Root Cause: Standard browser `SpeechRecognition` (Web Speech API) on Windows is suppressed/gated while the browser tab is outputting audio, meaning recognition events and interim transcripts do not fire during active playback without hardware echo cancellation.
+3. **Pending Resolution from Mac**:
+   - Mac engineering is implementing a shared echo-cancelled `getUserMedia` audio input pipeline with acoustic speech detection (VAD / energy threshold) to halt audio playback immediately upon detecting user speech, without waiting for Web Speech API transcription.
+   - Windows workspace is maintaining source stability and keeping gateway active; awaiting the focused patch.
 
 ### E. Owner Localhost Test Route
 The gateway process (`server.py`) remains active on `http://127.0.0.1:8000`:
 1. Keep the normal Chrome/Edge tab open at `http://localhost:8000/`.
-2. Confirm the header badge displays `wake-2026.11.21.1 · LAPTOP-3JUO75R2` with `"Say Hey Jarvis"`.
-3. Speak: *"Hey Jarvis, tell me a short story"* to test wake-word activation and response.
-4. Speak: *"Hey Jarvis, stop"* while speech playback is active to test interruption.
+2. Header badge confirms `wake-2026.11.21.1 · LAPTOP-3JUO75R2` with `"Say Hey Jarvis"`.
+3. Standby wake-word activation and spoken answers are operational. Interruption during speech awaits the acoustic detection patch.
 
