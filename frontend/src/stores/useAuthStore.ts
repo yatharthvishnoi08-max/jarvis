@@ -48,8 +48,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       const statusRes = await fetch('/api/auth/status');
       if (statusRes.ok) {
         const data = await statusRes.json();
-        if (!data.auth_required) {
-          const autoToken = data.token || token || 'local-owner';
+        if (!data.auth_required && (data.is_local ?? true)) {
+          const autoToken = token || 'local-owner';
           localStorage.setItem('jarvis_auth_token', autoToken);
           set({ token: autoToken, isAuthenticated: true, isLoading: false, error: null });
           return true;

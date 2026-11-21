@@ -116,3 +116,51 @@ def test_ca_certificate_endpoint():
         assert "application/x-x509-ca-cert" in res.headers.get("content-type", "")
         assert b"BEGIN CERTIFICATE" in res.content
 
+def test_auth_status_never_exposes_token(monkeypatch):
+    from fastapi.testclient import TestClient
+    import server
+    monkeypatch.setenv("REQUIRE_AUTH", "false")
+    with TestClient(server.app) as client:
+        res = client.get("/api/auth/status")
+        assert res.status_code == 200
+        data = res.json()
+        assert "token" not in data
+        assert OWNER_TOKEN not in res.text
+
+def test_seamless_local_auth_restrictions(monkeypatch):
+    from fastapi.testclient import TestClient
+    from starlette.requests import Request
+    import server
+
+    # 1. When REQUIRE_AUTH=false and loopback request
+    monkeypatch.setenv("REQUIRE_AUTH", "false")
+    with TestClient(server.app) as client:
+        # Loopback with valid local Host succeeds
+        res = client.get("/api/system/telemetry")
+        assert res.status_code == 200
+
+    # 2. Remote IP must NOT bypass auth even if REQUIRE_AUTH=false
+    # Simulate non-loopback client
+    req_remote = Request(scope={
+        "type": "http",
+        "method": "GET",
+        "path": "/api/system/telemetry",
+        "headers": [(b"host", b"192.168.1.30:8000")],
+        "client": ("192.168.1.150", 52140)
+    })
+    assert server.is_local_request(req_remote) is False
+    with pytest.raises(Exception) as excinfo:
+        server.authenticate_request(req_remote, None)
+    assert excinfo.value.status_code == 401
+
+    # 3. Non-local Host header rejected
+    req_bad_host = Request(scope={
+        "type": "http",
+        "method": "GET",
+        "path": "/api/system/telemetry",
+        "headers": [(b"host", b"evil.com")],
+        "client": ("127.0.0.1", 52140)
+    })
+    assert server.is_local_request(req_bad_host) is False
+
+

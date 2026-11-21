@@ -98,15 +98,50 @@ agent = JarvisAgent()
 speaker = ElevenLabsSpeaker()
 security = HTTPBearer(auto_error=False)
 
-def authenticate_request(credentials: Optional[HTTPAuthorizationCredentials] = Security(security)) -> bool:
-    if not is_auth_required():
-        return True
-    if not credentials or not verify_token(credentials.credentials):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or missing owner authorization token."
-        )
+def is_local_request(request: Request) -> bool:
+    """
+    Checks if an HTTP/WebSocket request originates from loopback with a valid local Host/Origin.
+    Prevents remote or cross-origin access from bypassing authentication when REQUIRE_AUTH=false.
+    """
+    client_host = request.client.host if request.client else ""
+    is_loopback = client_host in ("127.0.0.1", "::1", "localhost", "testclient")
+    if not is_loopback:
+        return False
+
+    host_header = (request.headers.get("host") or "").split(":")[0].lower()
+    is_local_host = host_header in ("localhost", "127.0.0.1", "[::1]", "testclient", "testserver")
+    if not is_local_host:
+        return False
+
+    origin = request.headers.get("origin")
+    if origin:
+        try:
+            from urllib.parse import urlparse
+            origin_host = (urlparse(origin).hostname or "").lower()
+            if origin_host not in ("localhost", "127.0.0.1", "::1"):
+                return False
+        except Exception:
+            return False
+
     return True
+
+def authenticate_request(
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Security(security)
+) -> bool:
+    # 1. Valid token is ALWAYS accepted
+    if credentials and verify_token(credentials.credentials):
+        return True
+
+    # 2. Seamless local use is strictly preserved for loopback with valid local Origin/Host when auth is not required
+    if not is_auth_required() and is_local_request(request):
+        return True
+
+    # 3. Remote requests or missing/invalid token require authentication
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid or missing owner authorization token."
+    )
 
 # Rate limiting middleware
 @app.middleware("http")
@@ -145,22 +180,24 @@ def get_lan_and_tailscale_ips() -> Dict[str, List[str]]:
 # ----------------- REST ENDPOINTS -----------------
 
 @app.get("/api/auth/status")
-async def get_auth_status():
-    """Public endpoint returning whether authentication is required for this gateway."""
+async def get_auth_status(request: Request):
+    """Public endpoint returning whether authentication is required for this gateway and if client is local."""
     required = is_auth_required()
+    local = is_local_request(request)
     return {
         "auth_required": required,
-        "token": OWNER_TOKEN if not required else None
+        "is_local": local
     }
 
 @app.get("/api/auth/verify")
-async def verify_auth(auth: bool = Depends(authenticate_request)):
+async def verify_auth(request: Request, auth: bool = Depends(authenticate_request)):
     required = is_auth_required()
+    local = is_local_request(request)
     return {
         "status": "authenticated",
         "role": "owner",
         "auth_required": required,
-        "token": OWNER_TOKEN if not required else None
+        "is_local": local
     }
 
 class LoginRequest(BaseModel):
