@@ -150,7 +150,7 @@ export const Composer: React.FC<{text:string;setText:(value:string)=>void}> = ({
       </form>
       {voiceConversation && <div className="voice-conversation-status" role="status">
         <span className={isListening ? 'voice-dot listening' : 'voice-dot'}/>
-        <span>{isListening ? 'Listening — go ahead' : pendingApprovals.length ? 'Waiting for your approval' : playbackState === 'speaking' ? 'Jarvis is speaking' : playbackState === 'generating' || playbackState === 'buffering' ? 'Preparing voice reply…' : 'Jarvis is thinking…'}</span>
+        <span>{isListening ? 'Listening — go ahead' : pendingApprovals.length ? 'Waiting for your approval' : playbackState === 'speaking' ? 'Jarvis is speaking' : playbackState === 'generating' || playbackState === 'buffering' ? 'Preparing voice reply…' : isBusy ? 'Jarvis is thinking…' : 'Starting microphone…'}</span>
         <button type="button" onClick={toggleMic}>End conversation</button>
       </div>}
       {voiceConversation && liveTranscript && <p className="voice-live-transcript">{liveTranscript}</p>}

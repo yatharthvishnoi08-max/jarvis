@@ -35,6 +35,7 @@ export function App() {
   const [draft,setDraft]=useState('');
   const [sessionError,setSessionError]=useState('');
   const online=ws?.readyState===WebSocket.OPEN;
+  const playbackState=useAudioStore(s=>s.playbackState);
   useEffect(()=>{void checkAuth();},[checkAuth]);
   useEffect(()=>{
     if(isAuthenticated) connectWebSocket();
@@ -57,7 +58,7 @@ export function App() {
   const latestUser=messages.filter(m=>m.role==='user').slice(-1)[0];
   const latestReply=messages.filter(m=>m.role==='assistant' && m.content).slice(-1)[0];
   const busy=orbState==='thinking'||orbState==='acting';
-  const phase=orbState==='error' && !pendingApprovals.length?'Check gateway status':!online?'Gateway offline':pendingApprovals.length?'Approval needed':isListening?'Listening':busy?'Working on your request':'Ready to talk';
+  const phase=orbState==='error' && !pendingApprovals.length?'Check gateway status':!online?'Gateway offline':pendingApprovals.length?'Approval needed':isListening?'Listening':busy?'Working on your request':playbackState==='speaking'?'Speaking':['generating','buffering'].includes(playbackState)?'Preparing voice reply':'Ready to talk';
   return <div className="jarvis-shell network-shell">
     {menu && <button className="rail-backdrop" onClick={()=>setMenu(false)} aria-label="Close navigation"/>}
     <aside className={'network-rail '+(menu?'opened':'')} aria-label="Sidebar">
