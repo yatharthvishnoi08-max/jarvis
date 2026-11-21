@@ -659,15 +659,17 @@ TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "mouse_click",
-            "description": "Click the mouse at specified screen (x, y) coordinates or at current position.",
+            "description": "Click the mouse at specified screen (x, y) coordinates or at current position within the verified target window.",
             "parameters": {
                 "type": "object",
                 "properties": {
+                    "target_window": {"type": "string", "description": "Expected target application or window title to verify before clicking."},
                     "x": {"type": "integer", "description": "X coordinate in pixels (optional)."},
                     "y": {"type": "integer", "description": "Y coordinate in pixels (optional)."},
                     "button": {"type": "string", "enum": ["left", "right", "middle"], "description": "Mouse button (default 'left')."},
                     "clicks": {"type": "integer", "enum": [1, 2], "description": "1 for single click, 2 for double click (default 1)."}
-                }
+                },
+                "required": ["target_window"]
             }
         }
     },
@@ -676,15 +678,16 @@ TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "mouse_move",
-            "description": "Smoothly move the mouse cursor to (x, y) coordinates on the screen.",
+            "description": "Smoothly move the mouse cursor to (x, y) coordinates on the screen within the verified target window.",
             "parameters": {
                 "type": "object",
                 "properties": {
+                    "target_window": {"type": "string", "description": "Expected target application or window title to verify before moving mouse."},
                     "x": {"type": "integer", "description": "X coordinate in pixels."},
                     "y": {"type": "integer", "description": "Y coordinate in pixels."},
                     "duration": {"type": "number", "description": "Movement duration in seconds (default 0.2)."}
                 },
-                "required": ["x", "y"]
+                "required": ["target_window", "x", "y"]
             }
         }
     },
@@ -693,13 +696,14 @@ TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "mouse_scroll",
-            "description": "Scroll the mouse wheel up (positive integer) or down (negative integer).",
+            "description": "Scroll the mouse wheel up (positive integer) or down (negative integer) within the verified target window.",
             "parameters": {
                 "type": "object",
                 "properties": {
+                    "target_window": {"type": "string", "description": "Expected target application or window title to verify before scrolling."},
                     "clicks": {"type": "integer", "description": "Scroll amount (e.g. 5 for up, -5 for down)."}
                 },
-                "required": ["clicks"]
+                "required": ["target_window", "clicks"]
             }
         }
     },
@@ -708,17 +712,18 @@ TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "mouse_drag",
-            "description": "Click and drag the mouse from (start_x, start_y) to (end_x, end_y).",
+            "description": "Click and drag the mouse from (start_x, start_y) to (end_x, end_y) within the verified target window.",
             "parameters": {
                 "type": "object",
                 "properties": {
+                    "target_window": {"type": "string", "description": "Expected target application or window title to verify before dragging."},
                     "start_x": {"type": "integer", "description": "Starting X coordinate."},
                     "start_y": {"type": "integer", "description": "Starting Y coordinate."},
                     "end_x": {"type": "integer", "description": "Ending X coordinate."},
                     "end_y": {"type": "integer", "description": "Ending Y coordinate."},
                     "duration": {"type": "number", "description": "Drag duration in seconds (default 0.5)."}
                 },
-                "required": ["start_x", "start_y", "end_x", "end_y"]
+                "required": ["target_window", "start_x", "start_y", "end_x", "end_y"]
             }
         }
     },
@@ -727,14 +732,15 @@ TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "keyboard_type",
-            "description": "Type text into the currently active or focused input field or window.",
+            "description": "Type text into the verified target window.",
             "parameters": {
                 "type": "object",
                 "properties": {
+                    "target_window": {"type": "string", "description": "Expected target application or window title to verify before typing."},
                     "text": {"type": "string", "description": "The exact string to type."},
                     "press_enter": {"type": "boolean", "description": "Whether to press Enter after typing (default false)."}
                 },
-                "required": ["text"]
+                "required": ["target_window", "text"]
             }
         }
     },
@@ -743,13 +749,14 @@ TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "keyboard_press",
-            "description": "Press a single keyboard key (enter, esc, tab, space, backspace, win, f5, delete, up, down, left, right).",
+            "description": "Press a single keyboard key within the verified target window.",
             "parameters": {
                 "type": "object",
                 "properties": {
+                    "target_window": {"type": "string", "description": "Expected target application or window title to verify before pressing key."},
                     "key": {"type": "string", "description": "Key name to press."}
                 },
-                "required": ["key"]
+                "required": ["target_window", "key"]
             }
         }
     },
@@ -758,17 +765,18 @@ TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "keyboard_hotkey",
-            "description": "Press a keyboard shortcut combination (e.g. ['win', 'i'] for Settings, ['ctrl', 'c'] for copy, ['alt', 'tab']).",
+            "description": "Press a keyboard shortcut combination within the verified target window.",
             "parameters": {
                 "type": "object",
                 "properties": {
+                    "target_window": {"type": "string", "description": "Expected target application or window title to verify before pressing shortcut."},
                     "keys": {
                         "type": "array",
                         "items": {"type": "string"},
                         "description": "List of key names (e.g. ['win', 'i'], ['ctrl', 'v'], ['alt', 'f4'])."
                     }
                 },
-                "required": ["keys"]
+                "required": ["target_window", "keys"]
             }
         }
     },
@@ -830,15 +838,16 @@ TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "click_screen_element",
-            "description": "Visual Grounding: Look at the live screen using Gemini Vision, locate the target element (button, icon, menu, toggle), and click it automatically.",
+            "description": "Visual Grounding: Look at the live screen using Gemini Vision, locate the target element, and click it within the verified target window.",
             "parameters": {
                 "type": "object",
                 "properties": {
+                    "target_window": {"type": "string", "description": "Expected target application or window title to verify before clicking."},
                     "target_description": {"type": "string", "description": "Description of the element to click (e.g. 'Microphone toggle switch', 'Close icon', 'Start button')."},
                     "clicks": {"type": "integer", "enum": [1, 2], "description": "Single or double click (default 1)."},
                     "button": {"type": "string", "enum": ["left", "right"], "description": "Mouse button (default 'left')."}
                 },
-                "required": ["target_description"]
+                "required": ["target_window", "target_description"]
             }
         }
     },

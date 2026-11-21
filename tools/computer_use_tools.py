@@ -169,6 +169,27 @@ def verify_foreground_window(expected_keyword: str) -> tuple[bool, str]:
     except Exception as e:
         return False, f"ERROR checking foreground window: {str(e)}"
 
+def _enforce_desktop_and_target(target_window: str) -> tuple[bool, str]:
+    """
+    Strict guard that validates:
+    1. An explicit target window is provided (rejects empty / whitespace string).
+    2. Interactive desktop is accessible (is_desktop_available).
+    3. The active visible foreground window matches the expected target (verify_foreground_window).
+    Returns (True, "OK") if verified, or (False, error_message).
+    """
+    if not target_window or not str(target_window).strip():
+        return False, "ERROR: An explicit target_window is required to prevent unintended input."
+
+    avail, desk_msg = is_desktop_available()
+    if not avail:
+        return False, f"ERROR: Desktop unavailable ({desk_msg})"
+
+    verified, win_msg = verify_foreground_window(target_window)
+    if not verified:
+        return False, f"ERROR: Foreground window verification failed: {win_msg}"
+
+    return True, "OK"
+
 def get_mouse_position() -> str:
     """Returns the current mouse cursor (x, y) coordinates and screen dimensions."""
     if not PYAUTOGUI_AVAILABLE:
@@ -180,8 +201,12 @@ def get_mouse_position() -> str:
     except Exception as e:
         return f"ERROR reading mouse position: {str(e)}"
 
-def mouse_move(x: int, y: int, duration: float = 0.2) -> str:
-    """Moves the mouse cursor smoothly to the specified (x, y) screen coordinates."""
+def mouse_move(target_window: str, x: int, y: int, duration: float = 0.2) -> str:
+    """Moves the mouse cursor smoothly to the specified (x, y) screen coordinates within verified target window."""
+    valid, err = _enforce_desktop_and_target(target_window)
+    if not valid:
+        return err
+
     if not PYAUTOGUI_AVAILABLE:
         return "ERROR: PyAutoGUI is not available."
     try:
@@ -195,16 +220,21 @@ def mouse_move(x: int, y: int, duration: float = 0.2) -> str:
         return f"ERROR moving mouse: {str(e)}"
 
 def mouse_click(
+    target_window: str,
     x: Optional[int] = None,
     y: Optional[int] = None,
     button: str = "left",
     clicks: int = 1
 ) -> str:
     """
-    Clicks the mouse at the given (x, y) screen coordinates, or at current cursor location.
+    Clicks the mouse at the given (x, y) screen coordinates, or at current cursor location within verified target window.
     Supported buttons: 'left', 'right', 'middle'.
     Supported clicks: 1 (single click), 2 (double click).
     """
+    valid, err = _enforce_desktop_and_target(target_window)
+    if not valid:
+        return err
+
     if not PYAUTOGUI_AVAILABLE:
         return "ERROR: PyAutoGUI is not available."
     try:
@@ -234,8 +264,12 @@ def mouse_click(
     except Exception as e:
         return f"ERROR executing mouse click: {str(e)}"
 
-def mouse_scroll(clicks: int) -> str:
-    """Scrolls the active window wheel up (positive integer) or down (negative integer)."""
+def mouse_scroll(target_window: str, clicks: int) -> str:
+    """Scrolls the active window wheel up (positive integer) or down (negative integer) within verified target window."""
+    valid, err = _enforce_desktop_and_target(target_window)
+    if not valid:
+        return err
+
     if not PYAUTOGUI_AVAILABLE:
         return "ERROR: PyAutoGUI is not available."
     try:
@@ -245,8 +279,12 @@ def mouse_scroll(clicks: int) -> str:
     except Exception as e:
         return f"ERROR scrolling mouse: {str(e)}"
 
-def mouse_drag(start_x: int, start_y: int, end_x: int, end_y: int, duration: float = 0.5) -> str:
-    """Drags the mouse with the left button pressed from (start_x, start_y) to (end_x, end_y)."""
+def mouse_drag(target_window: str, start_x: int, start_y: int, end_x: int, end_y: int, duration: float = 0.5) -> str:
+    """Drags the mouse with the left button pressed from (start_x, start_y) to (end_x, end_y) within verified target window."""
+    valid, err = _enforce_desktop_and_target(target_window)
+    if not valid:
+        return err
+
     if not PYAUTOGUI_AVAILABLE:
         return "ERROR: PyAutoGUI is not available."
     try:
@@ -272,13 +310,16 @@ def _prevent_corner_failsafe():
         except Exception:
             pass
 
-def keyboard_type(text: str, press_enter: bool = False, interval: float = 0.02) -> str:
-    """Types the given text into the currently active or focused input field."""
+def keyboard_type(target_window: str, text: str, press_enter: bool = False, interval: float = 0.02) -> str:
+    """Types the given text into the verified target window."""
+    valid, err = _enforce_desktop_and_target(target_window)
+    if not valid:
+        return err
+
     if not PYAUTOGUI_AVAILABLE:
         return "ERROR: PyAutoGUI is not available."
     try:
         _prevent_corner_failsafe()
-        # Use pyperclip and hotkey ctrl+v for complex or unicode strings if typing fails
         try:
             pyautogui.typewrite(text, interval=interval)
         except Exception:
@@ -293,17 +334,12 @@ def keyboard_type(text: str, press_enter: bool = False, interval: float = 0.02) 
     except Exception as e:
         return f"ERROR typing text: {str(e)}"
 
-def keyboard_hotkey(keys: List[str]) -> str:
-    """
-    Executes a keyboard shortcut combination.
-    Examples:
-    - ['win', 'i'] -> Opens Windows Settings
-    - ['alt', 'tab'] -> Switches window
-    - ['win', 'r'] -> Opens Run dialog
-    - ['ctrl', 'c'] -> Copies selection
-    - ['ctrl', 'v'] -> Pastes selection
-    - ['ctrl', 'shift', 'esc'] -> Opens Task Manager
-    """
+def keyboard_hotkey(target_window: str, keys: List[str]) -> str:
+    """Executes a keyboard shortcut combination in the verified target window."""
+    valid, err = _enforce_desktop_and_target(target_window)
+    if not valid:
+        return err
+
     if not PYAUTOGUI_AVAILABLE:
         return "ERROR: PyAutoGUI is not available."
     try:
@@ -316,11 +352,12 @@ def keyboard_hotkey(keys: List[str]) -> str:
     except Exception as e:
         return f"ERROR executing hotkey: {str(e)}"
 
-def keyboard_press(key: str) -> str:
-    """
-    Presses a single key.
-    Examples: 'enter', 'esc', 'tab', 'space', 'backspace', 'win', 'f5', 'delete', 'up', 'down', 'left', 'right'.
-    """
+def keyboard_press(target_window: str, key: str) -> str:
+    """Presses a single key in the verified target window."""
+    valid, err = _enforce_desktop_and_target(target_window)
+    if not valid:
+        return err
+
     if not PYAUTOGUI_AVAILABLE:
         return "ERROR: PyAutoGUI is not available."
     try:
@@ -513,15 +550,29 @@ def _bring_app_window_to_foreground(keyword: str, timeout: float = 3.0) -> bool:
 def open_app(target: str) -> str:
     """
     Opens any Windows application by name, executable, URI, or file path,
-    ensuring it launches interactively on the physical desktop and springs to the foreground.
+    ensuring it launches interactively on the physical desktop and verifies it is visible in the foreground.
     Examples: 'telegram', 'notepad', 'calc', 'msedge', 'chrome', 'code', 'explorer', 'cmd', 'settings'.
     """
+    if not target or not str(target).strip():
+        return "ERROR: An explicit target application is required."
+
     clean_target = target.lower().strip()
 
     # Check if target is a known settings page
     if clean_target in WINDOWS_SETTINGS_MAP or "setting" in clean_target:
         page = clean_target.replace("settings", "").replace("setting", "").strip() or "home"
-        return open_windows_settings(page)
+        open_windows_settings(page)
+        start = time.time()
+        while time.time() - start < 3.0:
+            ok, _ = verify_foreground_window("settings")
+            if ok:
+                return f"SUCCESS: Opened Windows Settings ('{page}') and verified visible in foreground."
+            time.sleep(0.2)
+        return f"ERROR: Dispatched Windows Settings ('{page}'), but window failed to become visible foreground."
+
+    avail, desk_msg = is_desktop_available()
+    if not avail:
+        return f"ERROR: Desktop unavailable ({desk_msg})"
 
     resolved_path = None
     args = ""
@@ -546,63 +597,91 @@ def open_app(target: str) -> str:
     # 3. Launch via interactive spawner if path resolved
     if resolved_path and os.path.isabs(resolved_path):
         ok, msg = _launch_interactive_app(resolved_path, args)
-        if ok:
-            _bring_app_window_to_foreground(clean_target, timeout=2.5)
-            return f"SUCCESS: Launched application '{clean_target}' interactively ({resolved_path})."
-        return f"ERROR launching '{clean_target}': {msg}"
+        if not ok:
+            return f"ERROR launching '{clean_target}': {msg}"
+    else:
+        # Fallback for URI schemes, system PATH executables, or commands
+        try:
+            subprocess.Popen(f'cmd /c start "" "{target}"', shell=True)
+        except Exception as e:
+            return f"ERROR launching '{target}': {str(e)}"
 
-    # 4. Fallback for URI schemes, system PATH executables, or commands
-    try:
-        subprocess.Popen(f'cmd /c start "" "{target}"', shell=True)
-        time.sleep(0.5)
-        _bring_app_window_to_foreground(clean_target, timeout=2.0)
-        return f"SUCCESS: Dispatched launch for application '{target}'."
-    except Exception as e:
-        return f"ERROR launching '{target}': {str(e)}"
+    # Polling verification: open_app MUST NOT claim SUCCESS solely because launch was dispatched; verify visible foreground!
+    _bring_app_window_to_foreground(clean_target, timeout=2.5)
+    start = time.time()
+    while time.time() - start < 4.0:
+        verified, _ = verify_foreground_window(clean_target)
+        if verified:
+            return f"SUCCESS: Opened application '{clean_target}' and verified visible in foreground."
+        time.sleep(0.3)
+
+    return f"ERROR: Launched '{clean_target}', but failed to become visible foreground window."
 
 def focus_window(title_keyword: str) -> str:
-    """Brings an application window matching the title keyword to the foreground."""
-    # First attempt: Win32 InputDesktop Window Normalizer
-    if _bring_app_window_to_foreground(title_keyword, timeout=1.5):
-        return f"SUCCESS: Focused window matching '{title_keyword}' on active desktop."
+    """Brings an application window matching the title keyword to the foreground and verifies visible foreground."""
+    if not title_keyword or not str(title_keyword).strip():
+        return "ERROR: An explicit window title keyword is required."
 
+    clean_keyword = title_keyword.lower().strip()
+
+    avail, desk_msg = is_desktop_available()
+    if not avail:
+        return f"ERROR: Desktop unavailable ({desk_msg})"
+
+    # First attempt: Win32 InputDesktop Window Normalizer
+    _bring_app_window_to_foreground(clean_keyword, timeout=2.0)
+    verified, _ = verify_foreground_window(clean_keyword)
+    if verified:
+        return f"SUCCESS: Focused window matching '{title_keyword}' and verified visible in foreground."
+
+    # Second attempt: pygetwindow
     try:
         import pygetwindow as gw
-        matches = [w for w in gw.getAllWindows() if title_keyword.lower() in w.title.lower()]
+        matches = [w for w in gw.getAllWindows() if clean_keyword in w.title.lower()]
         if matches:
             target_win = matches[0]
             if target_win.isMinimized:
                 target_win.restore()
             target_win.activate()
-            return f"SUCCESS: Focused window '{target_win.title}'."
+            time.sleep(0.3)
+            verified, _ = verify_foreground_window(clean_keyword)
+            if verified:
+                return f"SUCCESS: Focused window '{target_win.title}' and verified visible in foreground."
     except Exception:
         pass
 
     # Fallback via PowerShell Win32 AppActivate
     ps_cmd = f"""
 $ws = New-Object -ComObject WScript.Shell
-$success = $ws.AppActivate('{title_keyword}')
+$success = $ws.AppActivate('{clean_keyword}')
 if ($success) {{ Write-Output "SUCCESS" }} else {{ Write-Output "NOT_FOUND" }}
 """
     try:
         res = subprocess.run(["powershell", "-NoProfile", "-Command", ps_cmd], capture_output=True, text=True, timeout=5)
         if "SUCCESS" in res.stdout:
-            return f"SUCCESS: Activated application matching '{title_keyword}'."
-        return f"NOTICE: Could not find active window matching '{title_keyword}'."
-    except Exception as ex:
-        return f"ERROR focusing window: {str(ex)}"
+            time.sleep(0.3)
+            verified, _ = verify_foreground_window(clean_keyword)
+            if verified:
+                return f"SUCCESS: Activated application matching '{title_keyword}' and verified visible in foreground."
+    except Exception:
+        pass
+
+    return f"ERROR: Failed to bring window matching '{title_keyword}' to visible foreground."
 
 def click_screen_element(
+    target_window: str,
     target_description: str,
     clicks: int = 1,
     button: str = "left"
 ) -> str:
     """
-    Visual Grounding & Clicking:
+    Visual Grounding & Clicking within verified target window:
     Captures the live screen, sends the screenshot to Gemini Vision to pinpoint
     the exact (x, y) coordinates of the requested UI element, and clicks it!
-    Example targets: 'Start button', 'Microphone toggle switch', 'Close icon', 'Save button'.
     """
+    valid, err = _enforce_desktop_and_target(target_window)
+    if not valid:
+        return err
     from tools.multimodal_tools import _get_vision_client, _ensure_input_desktop
     from PIL import ImageGrab
 
