@@ -1,4 +1,5 @@
 import json
+import os
 import time
 import uuid
 import asyncio
@@ -944,7 +945,7 @@ class JarvisAgent:
         messages = [{"role": "system", "content": self.build_system_prompt(user_input, recent_context)}]
         messages.extend(session.model_history())
 
-        max_turns = 10
+        max_turns = int(os.getenv("MAX_TURNS", "30"))
         loop = asyncio.get_event_loop()
 
         for turn in range(max_turns):
