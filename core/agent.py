@@ -19,6 +19,7 @@ from core.approvals import (
     POLICY_BLOCKED,
 )
 from core.session import Session, session_manager
+from core.execution_control import run_tool
 from tools.planner import add_task, complete_task, list_tasks
 from tools.system_tools import (
     execute_powershell,
@@ -1122,7 +1123,9 @@ class JarvisAgent:
                 step_error = None
                 if fn:
                     try:
-                        raw_result = await loop.run_in_executor(None, lambda: fn(**args))
+                        raw_result = await loop.run_in_executor(
+                            None, run_tool, fn, args, lambda: session.is_cancelled
+                        )
                     except Exception as err:
                         raw_result = f"ERROR executing {fn_name}: {str(err)}"
                         step_error = str(err)
