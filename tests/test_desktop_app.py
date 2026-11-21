@@ -29,15 +29,21 @@ def test_launchers_exist():
 
 def test_desktop_app_module_functions():
     import desktop_app
-
-    # Test server check function
-    # Port 8000 is running our active daemon
-    running = desktop_app.is_server_running("127.0.0.1", 8000)
-    assert running is True
+    import socket
 
     # Test non-existent port returns False
     closed = desktop_app.is_server_running("127.0.0.1", 59999)
     assert closed is False
+
+    # Test active loopback socket detection returns True
+    test_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    test_sock.bind(("127.0.0.1", 0))
+    test_sock.listen(1)
+    port = test_sock.getsockname()[1]
+    try:
+        assert desktop_app.is_server_running("127.0.0.1", port) is True
+    finally:
+        test_sock.close()
 
     # Check power management flags
     assert desktop_app.ES_CONTINUOUS == 0x80000000

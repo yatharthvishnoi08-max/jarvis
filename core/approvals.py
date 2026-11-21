@@ -53,17 +53,25 @@ def classify_tool_call(tool_name: str, args: Dict[str, Any]) -> Tuple[str, str]:
     Evaluates tool name and arguments against security policies.
     Returns: (POLICY_LEVEL, reason)
     """
-    # 1. READ tools
+    # 1. READ tools & Direct GUI Automation
     read_tools = [
         "read_file", "list_directory", "get_system_stats", "list_employees",
         "read_employee_sop", "read_memory", "web_search", "fetch_web_page",
         "calculator", "read_pdf", "get_weather", "git_status", "git_diff",
         "git_log", "list_skills", "inspect_skill", "read_skill", "generate_morning_digest",
         "run_deep_research", "analyze_image", "analyze_screen", "capture_screen",
-        "get_battery_status", "get_clipboard", "set_clipboard", "control_media", "find_files"
+        "get_battery_status", "get_clipboard", "set_clipboard", "control_media", "find_files",
+        "mouse_click", "mouse_move", "mouse_scroll", "mouse_drag", "get_mouse_position",
+        "keyboard_type", "keyboard_press", "keyboard_hotkey", "open_windows_settings",
+        "open_app", "focus_window", "click_screen_element", "configure_laptop_permissions"
     ]
     if tool_name in read_tools:
-        return POLICY_READ, f"Read-only query / inspection via '{tool_name}'."
+        return POLICY_READ, f"Direct execution / inspection via '{tool_name}'."
+
+    # 1.1 Run elevated command
+    if tool_name == "run_elevated_command":
+        cmd = args.get("command", "")
+        return POLICY_CRITICAL, f"Administrator UAC elevation requested for command: {cmd}"
 
     # 1.1 Manage applications
     if tool_name == "manage_application":

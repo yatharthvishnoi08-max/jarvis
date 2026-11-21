@@ -35,6 +35,22 @@ from tools.multimodal_tools import (
     capture_screen,
     analyze_screen,
 )
+from tools.computer_use_tools import (
+    mouse_click,
+    mouse_move,
+    mouse_scroll,
+    mouse_drag,
+    keyboard_type,
+    keyboard_press,
+    keyboard_hotkey,
+    get_mouse_position,
+    open_windows_settings,
+    open_app,
+    focus_window,
+    click_screen_element,
+    configure_laptop_permissions,
+    run_elevated_command,
+)
 from tools.meta_tools import (
     list_employees,
     read_employee_sop,
@@ -122,6 +138,21 @@ TOOL_FUNCTIONS = {
     "control_media": control_media,
     "manage_application": manage_application,
     "find_files": find_files,
+    # Computer Use & OS Automation
+    "mouse_click": mouse_click,
+    "mouse_move": mouse_move,
+    "mouse_scroll": mouse_scroll,
+    "mouse_drag": mouse_drag,
+    "keyboard_type": keyboard_type,
+    "keyboard_press": keyboard_press,
+    "keyboard_hotkey": keyboard_hotkey,
+    "get_mouse_position": get_mouse_position,
+    "open_windows_settings": open_windows_settings,
+    "open_app": open_app,
+    "focus_window": focus_window,
+    "click_screen_element": click_screen_element,
+    "configure_laptop_permissions": configure_laptop_permissions,
+    "run_elevated_command": run_elevated_command,
 }
 
 TOOL_SCHEMAS = [
@@ -591,6 +622,223 @@ TOOL_SCHEMAS = [
                     "max_results": {"type": "integer", "description": "Maximum number of results to return (default 15)."}
                 },
                 "required": ["pattern"]
+            }
+        }
+    },
+    # 34. mouse_click
+    {
+        "type": "function",
+        "function": {
+            "name": "mouse_click",
+            "description": "Click the mouse at specified screen (x, y) coordinates or at current position.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "x": {"type": "integer", "description": "X coordinate in pixels (optional)."},
+                    "y": {"type": "integer", "description": "Y coordinate in pixels (optional)."},
+                    "button": {"type": "string", "enum": ["left", "right", "middle"], "description": "Mouse button (default 'left')."},
+                    "clicks": {"type": "integer", "enum": [1, 2], "description": "1 for single click, 2 for double click (default 1)."}
+                }
+            }
+        }
+    },
+    # 35. mouse_move
+    {
+        "type": "function",
+        "function": {
+            "name": "mouse_move",
+            "description": "Smoothly move the mouse cursor to (x, y) coordinates on the screen.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "x": {"type": "integer", "description": "X coordinate in pixels."},
+                    "y": {"type": "integer", "description": "Y coordinate in pixels."},
+                    "duration": {"type": "number", "description": "Movement duration in seconds (default 0.2)."}
+                },
+                "required": ["x", "y"]
+            }
+        }
+    },
+    # 36. mouse_scroll
+    {
+        "type": "function",
+        "function": {
+            "name": "mouse_scroll",
+            "description": "Scroll the mouse wheel up (positive integer) or down (negative integer).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "clicks": {"type": "integer", "description": "Scroll amount (e.g. 5 for up, -5 for down)."}
+                },
+                "required": ["clicks"]
+            }
+        }
+    },
+    # 37. mouse_drag
+    {
+        "type": "function",
+        "function": {
+            "name": "mouse_drag",
+            "description": "Click and drag the mouse from (start_x, start_y) to (end_x, end_y).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "start_x": {"type": "integer", "description": "Starting X coordinate."},
+                    "start_y": {"type": "integer", "description": "Starting Y coordinate."},
+                    "end_x": {"type": "integer", "description": "Ending X coordinate."},
+                    "end_y": {"type": "integer", "description": "Ending Y coordinate."},
+                    "duration": {"type": "number", "description": "Drag duration in seconds (default 0.5)."}
+                },
+                "required": ["start_x", "start_y", "end_x", "end_y"]
+            }
+        }
+    },
+    # 38. keyboard_type
+    {
+        "type": "function",
+        "function": {
+            "name": "keyboard_type",
+            "description": "Type text into the currently active or focused input field or window.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string", "description": "The exact string to type."},
+                    "press_enter": {"type": "boolean", "description": "Whether to press Enter after typing (default false)."}
+                },
+                "required": ["text"]
+            }
+        }
+    },
+    # 39. keyboard_press
+    {
+        "type": "function",
+        "function": {
+            "name": "keyboard_press",
+            "description": "Press a single keyboard key (enter, esc, tab, space, backspace, win, f5, delete, up, down, left, right).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "key": {"type": "string", "description": "Key name to press."}
+                },
+                "required": ["key"]
+            }
+        }
+    },
+    # 40. keyboard_hotkey
+    {
+        "type": "function",
+        "function": {
+            "name": "keyboard_hotkey",
+            "description": "Press a keyboard shortcut combination (e.g. ['win', 'i'] for Settings, ['ctrl', 'c'] for copy, ['alt', 'tab']).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "keys": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of key names (e.g. ['win', 'i'], ['ctrl', 'v'], ['alt', 'f4'])."
+                    }
+                },
+                "required": ["keys"]
+            }
+        }
+    },
+    # 41. get_mouse_position
+    {
+        "type": "function",
+        "function": {
+            "name": "get_mouse_position",
+            "description": "Get current mouse cursor coordinates and display resolution.",
+            "parameters": {"type": "object", "properties": {}}
+        }
+    },
+    # 42. open_windows_settings
+    {
+        "type": "function",
+        "function": {
+            "name": "open_windows_settings",
+            "description": "Directly open Windows Settings to a specific page ('microphone', 'camera', 'apps', 'startup', 'security', 'sound', 'display', 'network', 'bluetooth', 'power', 'updates', 'home').",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "page": {"type": "string", "description": "Settings page name (e.g. 'microphone', 'apps', 'security', 'sound', 'home')."}
+                }
+            }
+        }
+    },
+    # 43. open_app
+    {
+        "type": "function",
+        "function": {
+            "name": "open_app",
+            "description": "Open or launch any application by name or executable (e.g. 'notepad', 'calc', 'chrome', 'msedge', 'code', 'explorer', 'settings').",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "target": {"type": "string", "description": "Name or executable of the application or document."}
+                },
+                "required": ["target"]
+            }
+        }
+    },
+    # 44. focus_window
+    {
+        "type": "function",
+        "function": {
+            "name": "focus_window",
+            "description": "Bring an application window to the foreground by matching its title.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title_keyword": {"type": "string", "description": "Partial or full title of the window to activate."}
+                },
+                "required": ["title_keyword"]
+            }
+        }
+    },
+    # 45. click_screen_element
+    {
+        "type": "function",
+        "function": {
+            "name": "click_screen_element",
+            "description": "Visual Grounding: Look at the live screen using Gemini Vision, locate the target element (button, icon, menu, toggle), and click it automatically.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "target_description": {"type": "string", "description": "Description of the element to click (e.g. 'Microphone toggle switch', 'Close icon', 'Start button')."},
+                    "clicks": {"type": "integer", "enum": [1, 2], "description": "Single or double click (default 1)."},
+                    "button": {"type": "string", "enum": ["left", "right"], "description": "Mouse button (default 'left')."}
+                },
+                "required": ["target_description"]
+            }
+        }
+    },
+    # 46. configure_laptop_permissions
+    {
+        "type": "function",
+        "function": {
+            "name": "configure_laptop_permissions",
+            "description": "Directly configure Windows laptop permissions (Microphone privacy consent for desktop apps, PowerShell RemoteSigned, and Firewall).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "permission_type": {"type": "string", "description": "'all' or specific permission (optional)."}
+                }
+            }
+        }
+    },
+    # 47. run_elevated_command
+    {
+        "type": "function",
+        "function": {
+            "name": "run_elevated_command",
+            "description": "Execute an administrative command via Windows UAC elevation (RunAs).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {"type": "string", "description": "The administrative command to execute."}
+                },
+                "required": ["command"]
             }
         }
     }

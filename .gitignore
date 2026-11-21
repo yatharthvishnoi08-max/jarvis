@@ -33,6 +33,8 @@ web_dist/
 memory/sessions/*.json
 memory/traces/
 memory/audit.jsonl
+memory/webview_profile/
+memory/screenshots/
 
 # TLS Certificates & Private Keys
 certs/
