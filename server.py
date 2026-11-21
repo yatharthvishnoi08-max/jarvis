@@ -437,11 +437,12 @@ class LogMemoryRequest(BaseModel):
     category: str = Field(min_length=1, max_length=40)
     rule: str = Field(min_length=1, max_length=4000)
     expires_at: Optional[str] = None
+    pinned: bool = False
 
 @app.post("/api/memory")
 async def add_memory_rule(req: LogMemoryRequest, auth: bool = Depends(authenticate_request)):
     try:
-        record = memory_store.add_memory(req.category, req.rule, expires_at=req.expires_at)
+        record = memory_store.add_memory(req.category, req.rule, expires_at=req.expires_at, pinned=req.pinned)
         return {"result": "Memory saved.", "record": record}
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
@@ -453,6 +454,17 @@ class ChangeMemoryRequest(BaseModel):
     category: Optional[str] = None
     rule: Optional[str] = None
     expires_at: Optional[str] = None
+    pinned: Optional[bool] = None
+
+
+class RecallMemoryRequest(BaseModel):
+    query: str = Field(max_length=2000)
+
+
+@app.post("/api/memory/recall")
+def preview_memory_recall(req: RecallMemoryRequest, auth: bool = Depends(authenticate_request)):
+    from tools.memory_recall import recall
+    return recall(req.query)
 
 
 @app.put("/api/memory/{memory_id}")
