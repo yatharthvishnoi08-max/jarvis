@@ -25,6 +25,7 @@ export interface Message {
   tool_call_id?: string;
   audio_id?: string;
   audio_url?: string;
+  voiceUnavailable?: boolean;
 }
 
 export interface SessionMeta {

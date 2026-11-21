@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
-import { Activity, AudioLines, Brain, ChevronsUpDown, CircleUser, Folder, LayoutDashboard, LogOut, Menu, Network, Plus, Settings2, ShieldAlert, Trash2, Users, Volume2, VolumeX, X } from 'lucide-react';
+import { Activity, AudioLines, Brain, ChevronsUpDown, CircleUser, Folder, LayoutDashboard, ListChecks, LogOut, Menu, Network, Plus, Settings2, ShieldAlert, Trash2, Users, Volume2, VolumeX, X } from 'lucide-react';
 import { useAuthStore } from './stores/useAuthStore';
 import { useJarvisStore } from './stores/useJarvisStore';
 import { useAudioStore } from './stores/useAudioStore';
+import { BasicChat } from './components/BasicChat';
 import { ChatArea } from './components/ChatArea';
+import { Planner } from './components/Planner';
 import { Composer } from './components/Composer';
 import { NetworkMap, Destination } from './components/NetworkMap';
 import { RightActivityPanel } from './components/RightActivityPanel';
@@ -16,7 +18,7 @@ import './conversation.css';
 import './network.css';
 
 const navigation = [
-  ['Network', Network], ['Dashboard', LayoutDashboard], ['Talk', AudioLines],
+  ['Network', Network], ['Planner', ListChecks], ['Dashboard', LayoutDashboard], ['Talk', AudioLines],
   ['Activity', Activity], ['Files', Folder], ['Memory', Brain], ['Assistant', Users], ['Settings', Settings2]
 ] as const;
 type View = typeof navigation[number][0] | 'Account';
@@ -25,7 +27,7 @@ export function App() {
   const {isAuthenticated,isLoading,checkAuth,logout}=useAuthStore();
   const {connectWebSocket,disconnectWebSocket,ws,sessions,currentSessionId,switchSession,createSession,deleteSession,
     messages,orbState,voiceEnabled,setVoiceEnabled,pendingApprovals,isListening,triggerEmergencyStop}=useJarvisStore();
-  const [page,setPage]=useState<'Network'|'Talk'>('Network');
+  const [page,setPage]=useState<'Network'|'Talk'|'Planner'>('Network');
   const [panel,setPanel]=useState<View|null>(null);
   const [menu,setMenu]=useState(false);
   const [draft,setDraft]=useState('');
@@ -42,17 +44,18 @@ export function App() {
   },[]);
   function open(view:View|Destination) {
     setMenu(false);setPanel(null);
-    if(view==='Network'||view==='Talk') setPage(view);
+    if(view==='Network'||view==='Talk'||view==='Planner') setPage(view);
     else if(view==='Files') {setDraft('Show my recent downloads.');setPage('Talk');}
     else if(view==='Voice') {document.querySelector<HTMLButtonElement>('.jarvis-composer button[type="button"]')?.focus();}
     else setPanel(view);
   }
   if(isLoading) return <div className="p-6">Opening Jarvis…</div>;
   if(!isAuthenticated) return <AuthModal/>;
+  if(new URLSearchParams(location.search).get('view') === 'basic') return <BasicChat/>;
   const latestUser=messages.filter(m=>m.role==='user').slice(-1)[0];
   const latestReply=messages.filter(m=>m.role==='assistant' && m.content).slice(-1)[0];
   const busy=orbState==='thinking'||orbState==='acting';
-  const phase=!online?'Gateway offline':pendingApprovals.length?'Approval needed':isListening?'Listening':busy?'Working on your request':'Ready to talk';
+  const phase=orbState==='error' && !pendingApprovals.length?'Check gateway status':!online?'Gateway offline':pendingApprovals.length?'Approval needed':isListening?'Listening':busy?'Working on your request':'Ready to talk';
   return <div className="jarvis-shell network-shell">
     {menu && <button className="rail-backdrop" onClick={()=>setMenu(false)} aria-label="Close navigation"/>}
     <aside className={'network-rail '+(menu?'opened':'')} aria-label="Sidebar">
@@ -69,6 +72,7 @@ export function App() {
     <div className="network-workspace"><header className="network-title"><button onClick={()=>setMenu(true)} aria-label="Open navigation"><Menu size={18}/></button>
       <h1>{page}</h1><button className="halt" onClick={triggerEmergencyStop} aria-label="Emergency stop" title="Emergency stop"><ShieldAlert size={16}/></button></header>
       <main className="network-surface">
+        {page==='Planner' ? <Planner/> : <>
         {page==='Network'?<><NetworkMap online={online} approvals={pendingApprovals.length} onOpen={open} onActivity={()=>open('Activity')}/>
           <div className="network-transcript" aria-live="polite">
             {latestUser && <small>You · {latestUser.content}</small>}
@@ -77,6 +81,7 @@ export function App() {
           </div></>:<ChatArea/>}
         <div className="voice-strip"><span aria-live="polite">{phase}</span><button aria-label="Voice replies" aria-pressed={voiceEnabled} title={voiceEnabled?'Mute replies':'Enable voice replies'} onClick={()=>{if(voiceEnabled)useAudioStore.getState().stopAudio();setVoiceEnabled(!voiceEnabled);}}>{voiceEnabled?<Volume2 size={15}/>:<VolumeX size={15}/>}</button></div>
         <Composer text={draft} setText={setDraft}/>
+        </>}
       </main>
     </div>
     {panel==='Activity' && <RightActivityPanel isOpen onClose={()=>setPanel(null)}/>}

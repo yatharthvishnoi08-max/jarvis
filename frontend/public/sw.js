@@ -1,6 +1,5 @@
-const CACHE_NAME = 'jarvis-pwa-v3';
+const CACHE_NAME = 'jarvis-pwa-v3.1';
 const ASSETS_TO_CACHE = [
-  '/',
   '/favicon.svg',
   '/manifest.webmanifest'
 ];
@@ -30,6 +29,22 @@ self.addEventListener('fetch', (event) => {
   if (event.request.url.includes('/api/') || event.request.url.includes('/ws')) {
     return;
   }
+
+  // Always check the network for app navigation so a newly deployed UI does
+  // not remain hidden behind an old cached index.html.
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          const copy = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put('/', copy));
+          return response;
+        })
+        .catch(() => caches.match('/'))
+    );
+    return;
+  }
+
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
       return cachedResponse || fetch(event.request);

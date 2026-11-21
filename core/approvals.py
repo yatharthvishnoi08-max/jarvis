@@ -54,7 +54,7 @@ def classify_tool_call(tool_name: str, args: Dict[str, Any]) -> Tuple[str, str]:
     Returns: (POLICY_LEVEL, reason)
     """
     # 1. READ tools
-    if tool_name in ["read_file", "list_directory", "get_system_stats", "list_employees", "read_employee_sop", "read_memory"]:
+    if tool_name in ["read_file", "list_directory", "get_system_stats", "list_employees", "read_employee_sop", "read_memory", "list_tasks"]:
         return POLICY_READ, "Read-only inspection tool."
 
     # 2. PowerShell analysis

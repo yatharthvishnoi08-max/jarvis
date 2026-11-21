@@ -7,13 +7,20 @@ from openai import OpenAI
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
 
+class ModelConfigurationError(ValueError):
+    pass
+
+
+def model_name() -> str:
+    return os.getenv("MODEL_NAME", "nousresearch/hermes-3-llama-3.1-70b").strip()
+
+
 def get_client() -> tuple[OpenAI, str]:
     api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
     base_url = os.getenv("API_BASE_URL", "https://openrouter.ai/api/v1").strip()
-    model_name = os.getenv("MODEL_NAME", "nousresearch/hermes-3-llama-3.1-70b").strip()
     
     if not api_key:
-        raise ValueError(
+        raise ModelConfigurationError(
             "\n[!] MISSING API KEY:\n"
             f"Please open '{BASE_DIR / '.env'}' and set your OPENROUTER_API_KEY.\n"
             "You can generate an OpenRouter key at: https://openrouter.ai/keys\n"
@@ -28,4 +35,4 @@ def get_client() -> tuple[OpenAI, str]:
             "X-Title": "Personal-JARVIS"
         }
     )
-    return client, model_name
+    return client, model_name()

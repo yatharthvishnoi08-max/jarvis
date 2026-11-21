@@ -2,8 +2,10 @@ import os
 import json
 import urllib.request
 import urllib.error
+import asyncio
 from pathlib import Path
 from dotenv import load_dotenv
+import websockets
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
@@ -67,6 +69,17 @@ with urllib.request.urlopen(voices_req) as resp:
     print(f"✔ Test 6 PASSED: ElevenLabs voice personas loaded ({vdata['active_voice_id']}).")
 
 # 7. Emergency stop
+async def verify_websocket():
+    ws_url = f"ws://localhost:8000/ws?token={token}"
+    async with websockets.connect(ws_url, open_timeout=5) as websocket:
+        await websocket.send(json.dumps({"type": "ping"}))
+        reply = json.loads(await asyncio.wait_for(websocket.recv(), timeout=5))
+        assert reply["type"] == "pong"
+
+asyncio.run(verify_websocket())
+print("✔ Test 7 PASSED: Authenticated WebSocket upgraded and answered ping.")
+
+# 8. Emergency stop
 stop_req = urllib.request.Request(
     f"{BASE_URL}/api/emergency-stop",
     data=b"{}",
@@ -75,6 +88,6 @@ stop_req = urllib.request.Request(
 with urllib.request.urlopen(stop_req) as resp:
     sdata = json.loads(resp.read().decode("utf-8"))
     assert sdata["status"] == "emergency_stop_triggered"
-    print("✔ Test 7 PASSED: Global emergency stop triggered and acknowledged.")
+    print("✔ Test 8 PASSED: Global emergency stop triggered and acknowledged.")
 
 print("\n🎉 ALL LIVE SERVER END-TO-END TESTS PASSED SUCCESSFULLY!")

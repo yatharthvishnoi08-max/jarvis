@@ -112,6 +112,7 @@ export const ChatArea: React.FC = () => {
               )}
 
               {/* Unique Audio Playback Control */}
+              {msg.voiceUnavailable && <p role="status">Voice unavailable for this reply.</p>}
               {msg.audio_id && (
                 <div className="mt-3 pt-2.5 border-t border-slate-800/60 flex items-center justify-between text-xs font-mono">
                   <div className="flex items-center space-x-2">

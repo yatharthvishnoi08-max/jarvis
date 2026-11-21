@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useJarvisStore } from '../stores/useJarvisStore';
-import { Send, Mic, MicOff, Square } from 'lucide-react';
+import { Send, Mic, MicOff, Square, WifiOff, RotateCw } from 'lucide-react';
 
 export const Composer: React.FC<{text:string;setText:(value:string)=>void}> = ({text,setText}) => {
   const { sendMessage, orbState, cancelSession, isListening, setIsListening, ws, pendingApprovals } = useJarvisStore();
   const online = ws?.readyState === WebSocket.OPEN;
+  const [micHint, setMicHint] = useState('');
+  const { connectionError, retryConnection } = useJarvisStore();
   const recognitionRef = useRef<any>(null);
 
   useEffect(() => {
@@ -31,6 +33,7 @@ export const Composer: React.FC<{text:string;setText:(value:string)=>void}> = ({
 
       recognition.onerror = (event: any) => {
         console.warn('Speech recognition error:', event.error);
+        setMicHint('Could not hear you. Check microphone permission or use your keyboard’s dictation.');
         setIsListening(false);
       };
 
@@ -40,22 +43,28 @@ export const Composer: React.FC<{text:string;setText:(value:string)=>void}> = ({
 
       recognitionRef.current = recognition;
       return () => {
-        recognition.onresult = recognition.onerror = recognition.onend = recognition.onstart = null;
+        recognition.onresult = recognition.onstart = recognition.onerror = recognition.onend = null;
         recognition.abort();
+        recognitionRef.current = null;
       };
     }
   }, [setIsListening, sendMessage]);
 
   const toggleMic = () => {
-    if (!recognitionRef.current) {
-      alert('Speech recognition is not supported in this browser. Use Chrome, Edge, or Safari.');
+    setMicHint('');
+    if (!window.isSecureContext || !recognitionRef.current) {
+      setMicHint('Use your phone keyboard’s dictation, then tap Send. The in-app mic needs HTTPS and a supported browser.');
       return;
     }
 
     if (isListening) {
       recognitionRef.current.stop();
     } else {
-      recognitionRef.current.start();
+      try {
+        recognitionRef.current.start();
+      } catch {
+        setMicHint('Microphone unavailable. Use keyboard dictation or try again.');
+      }
     }
   };
 
@@ -66,20 +75,37 @@ export const Composer: React.FC<{text:string;setText:(value:string)=>void}> = ({
   };
 
   const isBusy = orbState === 'thinking' || orbState === 'acting';
+  const isConnected = online && orbState !== 'disconnected' && (orbState !== 'error' || pendingApprovals.length > 0);
 
   return (
     <div className="jarvis-composer">
-      {!online && <p role="status">Gateway offline. You can keep typing while Jarvis reconnects.</p>}
+      {!isConnected && (
+        <div className="max-w-3xl mx-auto mb-3 flex items-center justify-between gap-3 rounded-xl border border-amber-500/30 bg-amber-950/30 px-3 py-2.5 text-xs text-amber-100">
+          <div className="flex items-center gap-2 min-w-0">
+            <WifiOff className="w-4 h-4 shrink-0 text-amber-400" />
+            <span className="truncate">{connectionError || 'Connecting to the JARVIS realtime gateway…'}</span>
+          </div>
+          <button
+            type="button"
+            onClick={retryConnection}
+            className="shrink-0 inline-flex items-center gap-1.5 rounded-lg border border-amber-400/40 bg-amber-400/10 px-2.5 py-1.5 font-mono font-semibold text-amber-200 hover:bg-amber-400/20"
+          >
+            <RotateCw className="w-3.5 h-3.5" />
+            Retry
+          </button>
+          <a href="?view=basic">Open basic chat</a>
+        </div>
+      )}
       <form onSubmit={handleSubmit} className="max-w-3xl mx-auto flex items-center space-x-2">
         {/* Microphone Button */}
         <button
           type="button"
           onClick={toggleMic}
-          disabled={!online || isBusy || pendingApprovals.length > 0}
+          disabled={!isConnected || isBusy || pendingApprovals.length > 0}
           className={`p-3 rounded-full border transition flex items-center justify-center shrink-0 shadow-lg ${
             isListening
               ? 'bg-red-950 border-red-500 text-red-400 animate-pulse'
-              : 'bg-obsidian-850 border-cyan-500/40 text-cyan-400 hover:bg-cyan-950/60 active:scale-95'
+              : 'bg-obsidian-850 border-cyan-500/40 text-cyan-400 hover:bg-cyan-950/60 active:scale-95 disabled:opacity-35 disabled:pointer-events-none'
           }`}
           title={isListening ? 'Stop Listening' : 'Tap to Speak'}
         >
@@ -115,7 +141,7 @@ export const Composer: React.FC<{text:string;setText:(value:string)=>void}> = ({
         ) : (
           <button
             type="submit"
-            disabled={!online || !text.trim() || pendingApprovals.length > 0}
+            disabled={!isConnected || !text.trim() || pendingApprovals.length > 0}
             className="p-2.5 rounded-full bg-jarvis-cyan text-obsidian-950 hover:bg-cyan-400 disabled:opacity-30 disabled:pointer-events-none active:scale-95 transition flex items-center justify-center shrink-0 font-bold"
             title="Send"
           >
@@ -123,6 +149,7 @@ export const Composer: React.FC<{text:string;setText:(value:string)=>void}> = ({
           </button>
         )}
       </form>
+      {micHint && <p role="status" className="max-w-3xl mx-auto mt-2 text-xs text-amber-200">{micHint}</p>}
     </div>
   );
 };

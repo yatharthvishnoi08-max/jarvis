@@ -32,4 +32,5 @@ web_dist/
 # Runtime session data & audit logs
 memory/sessions/*.json
 memory/audit.jsonl
+memory/planner.sqlite3*
 

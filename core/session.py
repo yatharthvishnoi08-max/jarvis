@@ -1,4 +1,5 @@
-import os
+import asyncio
+import re
 import json
 import time
 import uuid
@@ -18,6 +19,13 @@ class Session:
         self.updated_at = self.created_at
         self.messages: List[Dict[str, Any]] = []
         self._is_cancelled = False
+        self._turn_lock = None
+
+    @property
+    def turn_lock(self) -> asyncio.Lock:
+        if self._turn_lock is None:
+            self._turn_lock = asyncio.Lock()
+        return self._turn_lock
 
     def cancel(self):
         self._is_cancelled = True
@@ -93,17 +101,30 @@ class SessionManager:
     def __init__(self):
         self._active_sessions: Dict[str, Session] = {}
 
+    @staticmethod
+    def valid_id(session_id: str) -> bool:
+        return isinstance(session_id, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,100}", session_id) is not None
+
+    def get_session(self, session_id: str) -> Optional[Session]:
+        if not self.valid_id(session_id):
+            return None
+        if session_id not in self._active_sessions:
+            loaded = Session.load(session_id)
+            if loaded is None:
+                return None
+            self._active_sessions[session_id] = loaded
+        return self._active_sessions[session_id]
+
     def get_or_create_session(self, session_id: Optional[str] = None) -> Session:
         if session_id:
-            if session_id in self._active_sessions:
-                return self._active_sessions[session_id]
-            loaded = Session.load(session_id)
+            if not self.valid_id(session_id):
+                raise ValueError("Invalid conversation ID")
+            loaded = self.get_session(session_id)
             if loaded:
-                self._active_sessions[loaded.id] = loaded
                 return loaded
 
         # Create new
-        new_session = Session()
+        new_session = Session(session_id)
         new_session.save()
         self._active_sessions[new_session.id] = new_session
         return new_session
@@ -125,6 +146,8 @@ class SessionManager:
         return sessions_meta
 
     def delete_session(self, session_id: str) -> bool:
+        if not self.valid_id(session_id):
+            return False
         if session_id in self._active_sessions:
             del self._active_sessions[session_id]
         file_path = SESSIONS_DIR / f"{session_id}.json"

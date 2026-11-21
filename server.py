@@ -20,7 +20,8 @@ from fastapi import (
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from openai import APIStatusError, APITimeoutError
 
 from core.auth import verify_token, redact_secrets, global_rate_limiter, OWNER_TOKEN
 from core.audit import audit_logger
@@ -28,6 +29,8 @@ from core.approvals import approval_manager
 from core.session import session_manager, Session
 from core.speaker import ElevenLabsSpeaker
 from core.agent import JarvisAgent
+from core.client import ModelConfigurationError
+from tools import planner
 from tools.meta_tools import EMPLOYEES_DIR, MEMORY_FILE, read_memory, update_employee_sop, log_learned_rule
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -114,6 +117,68 @@ async def verify_auth(auth: bool = Depends(authenticate_request)):
 class LoginRequest(BaseModel):
     token: str
 
+
+class ConversationTurn(BaseModel):
+    session_id: str = Field(min_length=1, max_length=100)
+    text: str = Field(min_length=1, max_length=16000)
+
+
+@app.post("/api/chat")
+async def basic_chat(turn: ConversationTurn, auth: bool = Depends(authenticate_request)):
+    text = turn.text.strip()
+    if not text or not session_manager.valid_id(turn.session_id):
+        raise HTTPException(422, "Enter a message and a valid conversation ID.")
+    session = session_manager.get_or_create_session(turn.session_id)
+    async with session.turn_lock:
+        history = [{"role": m["role"], "content": m["content"]} for m in session.messages
+                   if m["role"] in ("user", "assistant") and m.get("content") and not m.get("tool_calls")]
+        prompt = [{"role": "system", "content": "You are Jarvis, a thoughtful personal assistant. Answer directly. You are in conversation mode. For actions on a device, direct the owner to the agent workspace."},
+                  *history[-40:], {"role": "user", "content": text}]
+        try:
+            client = agent.client.with_options(timeout=90, max_retries=0)
+            result = await asyncio.wait_for(asyncio.to_thread(
+                client.chat.completions.create, model=agent.model_name, messages=prompt
+            ), timeout=95)
+            answer = (result.choices[0].message.content or "").strip()
+        except ModelConfigurationError:
+            raise HTTPException(503, "The gateway needs a model API key. Configure OPENROUTER_API_KEY on the host and restart Jarvis.")
+        except (asyncio.TimeoutError, APITimeoutError):
+            raise HTTPException(504, "The model took too long. Please try again.")
+        except APIStatusError as exc:
+            hints = {401: "Check the model API key.", 403: "Check access to the configured model.",
+                     404: "Check the configured model name.", 402: "Check the provider balance.",
+                     429: "The model is busy. Try again shortly."}
+            raise HTTPException(502, hints.get(exc.status_code, "The model provider rejected the request."))
+        except Exception:
+            raise HTTPException(502, "Could not get a reply from the configured model. Check the gateway's model connection.")
+        if not answer:
+            raise HTTPException(502, "The model returned an empty reply. Please try again.")
+        user = session.add_message("user", text)
+        reply = session.add_message("assistant", answer)
+        return {"user": user, "reply": reply}
+
+
+@app.post("/api/sessions/{session_id}/replies/{message_id}/speech")
+async def speak_reply(session_id: str, message_id: str, auth: bool = Depends(authenticate_request)):
+    session = session_manager.get_session(session_id)
+    reply = next((m for m in session.messages if m["id"] == message_id and m["role"] == "assistant"), None) if session else None
+    if not reply:
+        raise HTTPException(404, "Reply not found.")
+    path = speaker.get_audio_path(reply["audio_id"]) if reply.get("audio_id") else None
+    if not path or not path.is_file():
+        if not speaker.api_key:
+            raise HTTPException(503, "ElevenLabs voice is not configured on this gateway.")
+        meta = await asyncio.to_thread(speaker.generate_speech, reply["content"], session_id, message_id)
+        if not meta:
+            raise HTTPException(502, "ElevenLabs could not generate this reply.")
+        reply["audio_id"] = meta["audio_id"]
+        if session_manager.get_session(session_id) is session:
+            session.save()
+        path = speaker.get_audio_path(meta["audio_id"])
+    if not path or not path.is_file():
+        raise HTTPException(502, "The generated audio could not be loaded.")
+    return FileResponse(path, media_type="audio/mpeg", headers={"Cache-Control": "no-store"})
+
 @app.post("/api/auth/login")
 async def login(req: LoginRequest):
     if verify_token(req.token):
@@ -125,7 +190,10 @@ async def get_telemetry(auth: bool = Depends(authenticate_request)):
     ips = get_lan_and_tailscale_ips()
     cpu = psutil.cpu_percent(interval=None)
     ram = psutil.virtual_memory()
-    disk = psutil.disk_usage("C:\\")
+    # Use the host's system volume on Windows, macOS, Linux, or a future
+    # container deployment instead of assuming the gateway always runs on C:.
+    disk_root = Path.home().anchor or os.path.abspath(os.sep)
+    disk = psutil.disk_usage(disk_root)
 
     return {
         "cpu_percent": cpu,
@@ -141,6 +209,30 @@ async def get_telemetry(auth: bool = Depends(authenticate_request)):
         "active_model": agent.model_name,
         "voice_configured": bool(speaker.api_key)
     }
+
+# Owner planner. Chat tools and the dashboard share one store.
+class PlannerItem(BaseModel):
+    title: str
+    due: Optional[str] = None
+
+
+@app.get("/api/planner")
+def read_planner(auth: bool = Depends(authenticate_request)):
+    return {"tasks": planner.open_tasks()}
+
+
+@app.post("/api/planner")
+def create_planner_item(item: PlannerItem, auth: bool = Depends(authenticate_request)):
+    try:
+        return {"message": planner.add_task(item.title, item.due)}
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/api/planner/{task_id}/complete")
+def finish_planner_item(task_id: int, auth: bool = Depends(authenticate_request)):
+    return {"message": planner.complete_task(task_id)}
+
 
 # Sessions
 @app.get("/api/sessions")
@@ -160,17 +252,24 @@ async def create_session(req: CreateSessionRequest, auth: bool = Depends(authent
 
 @app.get("/api/sessions/{session_id}")
 async def get_session(session_id: str, auth: bool = Depends(authenticate_request)):
-    sess = session_manager.get_or_create_session(session_id)
+    sess = session_manager.get_session(session_id)
+    if sess is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
     return {"id": sess.id, "title": sess.title, "messages": sess.messages}
 
 @app.delete("/api/sessions/{session_id}")
 async def delete_session(session_id: str, auth: bool = Depends(authenticate_request)):
+    sess = session_manager.get_session(session_id)
+    if sess and sess.turn_lock.locked():
+        raise HTTPException(status_code=409, detail="Wait for the current reply before deleting this chat.")
     success = session_manager.delete_session(session_id)
     return {"deleted": success}
 
 @app.post("/api/sessions/{session_id}/cancel")
 async def cancel_session(session_id: str, auth: bool = Depends(authenticate_request)):
-    sess = session_manager.get_or_create_session(session_id)
+    sess = session_manager.get_session(session_id)
+    if sess is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
     sess.cancel()
     approval_manager.cancel_session_approvals(session_id)
     audit_logger.log_event("SESSION_CANCELLED", session_id=session_id, action="cancel")
@@ -259,21 +358,12 @@ async def get_audio(audio_id: str):
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    # Verify auth token via query param
+    # Verify auth token before accepting the socket. A rejected handshake is
+    # clearer to clients and avoids accidentally accepting the same socket twice.
     token = websocket.query_params.get("token")
     if not token or not verify_token(token):
-        await websocket.accept()
-        # Allow one chance to send auth message
-        try:
-            auth_msg_raw = await asyncio.wait_for(websocket.receive_text(), timeout=5.0)
-            auth_data = json.loads(auth_msg_raw)
-            if auth_data.get("type") != "auth" or not verify_token(auth_data.get("token")):
-                await websocket.send_json({"type": "error", "message": "Unauthorized WebSocket connection."})
-                await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-                return
-        except Exception:
-            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-            return
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Unauthorized")
+        return
 
     await websocket.accept()
     loop = asyncio.get_event_loop()
@@ -361,39 +451,55 @@ async def websocket_endpoint(websocket: WebSocket):
                     )
 
                 # Run ReAct in executor thread to prevent blocking
-                response_text = await agent.chat_async(
-                    session=session,
-                    user_input=text,
-                    on_thought=on_thought,
-                    on_tool_start=on_tool_start,
-                    on_tool_end=on_tool_end,
-                    on_approval_needed=on_approval_needed
-                )
+                async with session.turn_lock:
+                    response_text = await agent.chat_async(
+                        session=session, user_input=text, on_thought=on_thought,
+                        on_tool_start=on_tool_start, on_tool_end=on_tool_end,
+                        on_approval_needed=on_approval_needed
+                    )
+                    reply = session.messages[-1] if session.messages else {}
+                    if reply.get("role") != "assistant" or reply.get("tool_calls"):
+                        reply = session.add_message("assistant", response_text)
+                response = {"type": "response", "session_id": session.id,
+                            "message_id": reply["id"], "text": response_text}
+                text_first = data.get("text_first") is True
+                if text_first:
+                    await websocket.send_json(response)
 
-                # Generate unique ElevenLabs audio if requested
                 audio_meta = None
                 if wants_voice and speaker.api_key and not session.is_cancelled:
                     await websocket.send_json({"type": "audio_state", "state": "generating"})
                     audio_meta = await loop.run_in_executor(
                         None,
-                        lambda: speaker.generate_speech(response_text, session_id=session_id)
+                        lambda: speaker.generate_speech(response_text, session_id=session.id, message_id=reply["id"])
                     )
 
                 audio_id = audio_meta["audio_id"] if audio_meta else None
                 audio_url = f"/api/audio/{audio_id}" if audio_id else None
 
-                await websocket.send_json({
-                    "type": "response",
-                    "session_id": session_id,
-                    "text": response_text,
-                    "audio_id": audio_id,
-                    "audio_url": audio_url
-                })
+                if audio_id and session_manager.get_session(session.id) is session:
+                    reply["audio_id"] = audio_id
+                    session.save()
+                audio_fields = {"audio_id": audio_id, "audio_url": audio_url}
+                if not text_first:
+                    await websocket.send_json({**response, **audio_fields})
+                elif wants_voice and not session.is_cancelled:
+                    await websocket.send_json({"type": "reply_audio", "session_id": session.id,
+                                               "message_id": reply["id"], **audio_fields})
 
     except WebSocketDisconnect:
         pass
     except Exception as e:
-        print(f"[WebSocket Error]: {e}")
+        safe_error = redact_secrets(str(e))
+        print(f"[WebSocket Error]: {safe_error}")
+        try:
+            await websocket.send_json({
+                "type": "error",
+                "message": "JARVIS hit an internal error. Check the gateway console for details."
+            })
+            await websocket.close(code=1011, reason="Internal server error")
+        except Exception:
+            pass
 
 # ----------------- STATIC PWA SERVING -----------------
 
@@ -416,6 +522,12 @@ async def serve_pwa(full_path: str):
 
 if __name__ == "__main__":
     import uvicorn
+    try:
+        import websockets  # noqa: F401
+    except ImportError as exc:
+        raise SystemExit(
+            "Missing WebSocket runtime. Run: python -m pip install -r requirements.txt"
+        ) from exc
     ips = get_lan_and_tailscale_ips()
     primary_lan = ips["lan"][0] if ips["lan"] else "localhost"
     primary_ts = ips["tailscale"][0] if ips["tailscale"] else None
@@ -429,4 +541,6 @@ if __name__ == "__main__":
         print(f"🔒 Tailscale Access: http://{primary_ts}:8000")
     print("="*68 + "\n")
 
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    # Pin the protocol implementation so a broken environment fails loudly
+    # instead of serving HTTP while silently routing /ws to the PWA fallback.
+    uvicorn.run(app, host="0.0.0.0", port=8000, ws="websockets")

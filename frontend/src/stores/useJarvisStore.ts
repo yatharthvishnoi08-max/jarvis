@@ -13,6 +13,8 @@ interface JarvisState {
   currentThought: string | null;
   pendingApprovals: ApprovalRequest[];
   ws: WebSocket | null;
+  connectionError: string | null;
+  reconnectAttempt: number;
   voiceEnabled: boolean;
   isEmergencyStopped: boolean;
   isListening: boolean;
@@ -22,8 +24,9 @@ interface JarvisState {
   setVoiceEnabled: (enabled: boolean) => void;
   setIsListening: (listening: boolean) => void;
   connectWebSocket: () => void;
+  retryConnection: () => void;
   disconnectWebSocket: () => void;
-  loadSessions: () => Promise<void>;
+  loadSessions: () => Promise<boolean>;
   createSession: (title?: string) => Promise<string>;
   switchSession: (sessionId: string) => Promise<void>;
   deleteSession: (sessionId: string) => Promise<void>;
@@ -36,9 +39,10 @@ interface JarvisState {
 
 export const useJarvisStore = create<JarvisState>((set, get) => {
   let reconnectTimer: any = null;
+  let selection = 0;
 
   return {
-    currentSessionId: 'default',
+    currentSessionId: '',
     sessions: [],
     messages: [],
     orbState: 'disconnected',
@@ -46,6 +50,8 @@ export const useJarvisStore = create<JarvisState>((set, get) => {
     currentThought: null,
     pendingApprovals: [],
     ws: null,
+    connectionError: null,
+    reconnectAttempt: 0,
     voiceEnabled: true,
     isEmergencyStopped: false,
     isListening: false,
@@ -68,7 +74,11 @@ export const useJarvisStore = create<JarvisState>((set, get) => {
         return;
       }
 
-      if (get().ws && get().ws?.readyState === WebSocket.OPEN) {
+      const existingSocket = get().ws;
+      if (
+        existingSocket &&
+        (existingSocket.readyState === WebSocket.CONNECTING || existingSocket.readyState === WebSocket.OPEN)
+      ) {
         return;
       }
 
@@ -76,31 +86,70 @@ export const useJarvisStore = create<JarvisState>((set, get) => {
       const wsUrl = `${protocol}//${window.location.host}/ws?token=${encodeURIComponent(token)}`;
 
       const socket = new WebSocket(wsUrl);
+      set({ ws: socket, connectionError: null });
 
-      socket.onopen = () => {
-        set({ ws: socket, orbState: 'idle', isEmergencyStopped: false });
+      socket.onopen = async () => {
+        if (get().ws !== socket) return;
+        set({
+          ws: socket,
+          orbState: 'disconnected',
+          isEmergencyStopped: false,
+          connectionError: null,
+          reconnectAttempt: 0
+        });
         if (reconnectTimer) clearTimeout(reconnectTimer);
-        get().loadSessions();
+        const initialSelection = selection;
+        const loaded = await get().loadSessions();
+        if (get().ws !== socket || initialSelection !== selection) return;
+        if (!loaded) {
+          set({ connectionError: 'Could not load your conversations. Tap Retry.' });
+          return;
+        }
+        const sessions = get().sessions;
+        const preferred = get().currentSessionId || localStorage.getItem('jarvis_session_id');
+        const target = sessions.find(s => s.id === preferred) || sessions[0];
+        await get().switchSession(target?.id || 'default');
         get().fetchPendingApprovals();
       };
 
-      socket.onclose = () => {
-        set({ ws: null, orbState: 'disconnected' });
+      socket.onclose = (event) => {
+        // Ignore a stale socket closed by cleanup or a newer connection.
+        if (get().ws !== socket) return;
+
+        const attempt = get().reconnectAttempt + 1;
+        const message = event.code === 1008
+          ? 'Connection rejected. Check the owner token.'
+          : event.code === 1011
+            ? 'The JARVIS core reported an internal error.'
+            : 'Realtime link unavailable. The gateway may be missing WebSocket support.';
+        set({
+          ws: null,
+          orbState: 'disconnected',
+          connectionError: message,
+          reconnectAttempt: attempt
+        });
+        const delay = Math.min(15000, 1500 * 2 ** Math.min(attempt - 1, 3));
         reconnectTimer = setTimeout(() => {
           if (useAuthStore.getState().isAuthenticated) {
             get().connectWebSocket();
           }
-        }, 3000);
+        }, delay);
       };
 
       socket.onerror = (err) => {
         console.error('WebSocket connection error:', err);
-        set({ orbState: 'error' });
+        set({
+          orbState: 'error',
+          connectionError: 'Unable to establish the realtime link to JARVIS.'
+        });
       };
 
       socket.onmessage = (event) => {
+        if (get().ws !== socket) return;
         try {
           const data = JSON.parse(event.data);
+          if (data.session_id && data.session_id !== get().currentSessionId &&
+              data.type !== 'approval_required') return;
 
           switch (data.type) {
             case 'thought':
@@ -148,18 +197,28 @@ export const useJarvisStore = create<JarvisState>((set, get) => {
               });
               // Append assistant message
               const newMsg: Message = {
-                id: `msg_${Date.now()}`,
+                id: data.message_id || `msg_${Date.now()}`,
                 role: 'assistant',
                 content: data.text,
                 timestamp: Math.floor(Date.now() / 1000),
                 audio_id: data.audio_id,
                 audio_url: data.audio_url
               };
-              set((state) => ({ messages: [...state.messages, newMsg] }));
+              set((state) => ({ messages: [...state.messages.filter(m => m.id !== newMsg.id), newMsg] }));
+              void get().loadSessions();
 
               // Play audio if available and voice enabled
               if (get().voiceEnabled && data.audio_url) {
                 set({ orbState: 'speaking' });
+                useAudioStore.getState().playAudio(data.audio_url, data.audio_id);
+              }
+              break;
+
+            case 'reply_audio':
+              set(state => ({ messages: state.messages.map(m => m.id === data.message_id
+                ? { ...m, audio_id: data.audio_id, audio_url: data.audio_url, voiceUnavailable: !data.audio_id }
+                : m) }));
+              if (data.audio_url && get().voiceEnabled && !get().isEmergencyStopped) {
                 useAudioStore.getState().playAudio(data.audio_url, data.audio_id);
               }
               break;
@@ -169,6 +228,15 @@ export const useJarvisStore = create<JarvisState>((set, get) => {
                 orbState: 'idle',
                 currentTool: null,
                 currentThought: null
+              });
+              break;
+
+            case 'error':
+              set({
+                orbState: 'error',
+                currentTool: null,
+                currentThought: null,
+                connectionError: data.message || 'JARVIS encountered an unexpected error.'
               });
               break;
 
@@ -182,11 +250,26 @@ export const useJarvisStore = create<JarvisState>((set, get) => {
     },
 
     disconnectWebSocket: () => {
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
       const socket = get().ws;
+      set({ ws: null, orbState: 'disconnected' });
       if (socket) {
         socket.close();
       }
-      set({ ws: null, orbState: 'disconnected' });
+    },
+
+    retryConnection: () => {
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
+      const socket = get().ws;
+      set({ ws: null, orbState: 'disconnected', connectionError: null, reconnectAttempt: 0 });
+      if (socket) socket.close();
+      get().connectWebSocket();
     },
 
     loadSessions: async () => {
@@ -198,16 +281,12 @@ export const useJarvisStore = create<JarvisState>((set, get) => {
         if (res.ok) {
           const data = await res.json();
           set({ sessions: data.sessions || [] });
-
-          // If no active session or active not in list, pick the first
-          const current = get().currentSessionId;
-          if (data.sessions.length > 0 && (!current || !data.sessions.some((s: SessionMeta) => s.id === current))) {
-            get().switchSession(data.sessions[0].id);
-          }
+          return true;
         }
       } catch (err) {
         console.error('Failed to load sessions:', err);
       }
+      return false;
     },
 
     createSession: async (title?: string) => {
@@ -234,22 +313,34 @@ export const useJarvisStore = create<JarvisState>((set, get) => {
     },
 
     switchSession: async (sessionId: string) => {
+      const request = ++selection;
+      const socket = get().ws;
+      set({ currentSessionId: '', messages: [], orbState: 'disconnected' });
+      useAudioStore.getState().stopAudio();
       const token = useAuthStore.getState().token;
       try {
         const res = await fetch(`/api/sessions/${sessionId}`, {
           headers: { Authorization: `Bearer ${token}` }
         });
-        if (res.ok) {
-          const data = await res.json();
+        const freshDefault = sessionId === 'default' && res.status === 404;
+        if (res.ok || freshDefault) {
+          const data = freshDefault ? { messages: [] } : await res.json();
+          if (request !== selection || get().ws !== socket) return;
+          localStorage.setItem('jarvis_session_id', sessionId);
           set({
             currentSessionId: sessionId,
+            orbState: socket?.readyState === WebSocket.OPEN ? 'idle' : 'disconnected',
+            connectionError: null,
             messages: data.messages || [],
             currentTool: null,
             currentThought: null
           });
           get().fetchPendingApprovals();
+        } else {
+          throw new Error('Conversation unavailable');
         }
       } catch (err) {
+        if (request === selection && get().ws === socket) set({ connectionError: 'Could not load this conversation. Retry to reconnect.' });
         console.error(`Failed to switch to session ${sessionId}:`, err);
       }
     },
@@ -263,6 +354,9 @@ export const useJarvisStore = create<JarvisState>((set, get) => {
         });
         if (res.ok) {
           await get().loadSessions();
+          if (get().currentSessionId === sessionId) {
+            await get().switchSession(get().sessions[0]?.id || 'default');
+          }
         }
       } catch (err) {
         console.error(`Failed to delete session ${sessionId}:`, err);
@@ -272,8 +366,8 @@ export const useJarvisStore = create<JarvisState>((set, get) => {
     sendMessage: (text: string) => {
       const socket = get().ws;
       const sessionId = get().currentSessionId;
-      if (!socket || socket.readyState !== WebSocket.OPEN || get().pendingApprovals.length ||
-          ['thinking', 'acting'].includes(get().orbState)) {
+      if (!sessionId || !socket || socket.readyState !== WebSocket.OPEN || get().pendingApprovals.length ||
+          ['acting', 'thinking', 'error', 'disconnected'].includes(get().orbState)) {
         return false;
       }
 
@@ -284,15 +378,23 @@ export const useJarvisStore = create<JarvisState>((set, get) => {
         content: text,
         timestamp: Math.floor(Date.now() / 1000)
       };
-      try { socket.send(
+      try {
+        socket.send(
         JSON.stringify({
           type: 'chat',
           session_id: sessionId,
           text: text,
+          text_first: true,
           voice: get().voiceEnabled
         })
-      ); } catch { return false; }
-      set((state) => ({ messages: [...state.messages, userMsg], orbState: 'thinking' }));
+      );
+      } catch {
+        return false;
+      }
+      set((state) => ({
+        messages: [...state.messages, userMsg],
+        orbState: 'thinking'
+      }));
       return true;
     },
 
