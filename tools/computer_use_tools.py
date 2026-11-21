@@ -58,6 +58,55 @@ WINDOWS_SETTINGS_MAP = {
     "taskbar": "ms-settings:taskbar"
 }
 
+# Common Windows application paths and aliases for instant launch
+COMMON_APP_MAP = {
+    "telegram": [
+        os.path.expandvars(r"%APPDATA%\Telegram Desktop\Telegram.exe"),
+        os.path.expandvars(r"%LOCALAPPDATA%\Programs\Telegram Desktop\Telegram.exe"),
+        r"C:\Program Files\Telegram Desktop\Telegram.exe",
+    ],
+    "tg": [
+        os.path.expandvars(r"%APPDATA%\Telegram Desktop\Telegram.exe"),
+        os.path.expandvars(r"%LOCALAPPDATA%\Programs\Telegram Desktop\Telegram.exe"),
+    ],
+    "chrome": [
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
+        "chrome",
+    ],
+    "code": [
+        os.path.expandvars(r"%LOCALAPPDATA%\Programs\Microsoft VS Code\Code.exe"),
+        r"C:\Program Files\Microsoft VS Code\Code.exe",
+        "code",
+    ],
+    "vscode": [
+        os.path.expandvars(r"%LOCALAPPDATA%\Programs\Microsoft VS Code\Code.exe"),
+        r"C:\Program Files\Microsoft VS Code\Code.exe",
+        "code",
+    ],
+    "edge": ["msedge"],
+    "msedge": ["msedge"],
+    "notepad": ["notepad"],
+    "calc": ["calc"],
+    "calculator": ["calc"],
+    "explorer": ["explorer"],
+    "cmd": ["cmd"],
+    "powershell": ["powershell"],
+    "taskmgr": ["taskmgr"],
+    "task_manager": ["taskmgr"],
+    "spotify": [
+        os.path.expandvars(r"%APPDATA%\Spotify\Spotify.exe"),
+        "spotify",
+    ],
+    "discord": [
+        os.path.expandvars(r"%LOCALAPPDATA%\Discord\Update.exe"),
+    ],
+    "whatsapp": [
+        os.path.expandvars(r"%LOCALAPPDATA%\WhatsApp\WhatsApp.exe"),
+    ]
+}
+
 def get_mouse_position() -> str:
     """Returns the current mouse cursor (x, y) coordinates and screen dimensions."""
     if not PYAUTOGUI_AVAILABLE:
@@ -235,7 +284,7 @@ def open_windows_settings(page: str = "home") -> str:
 def open_app(target: str) -> str:
     """
     Opens any Windows application by name, executable, URI, or file path.
-    Examples: 'notepad', 'calc', 'msedge', 'chrome', 'code', 'explorer', 'cmd', 'settings'.
+    Examples: 'telegram', 'notepad', 'calc', 'msedge', 'chrome', 'code', 'explorer', 'cmd', 'settings'.
     """
     clean_target = target.lower().strip()
 
@@ -244,9 +293,36 @@ def open_app(target: str) -> str:
         page = clean_target.replace("settings", "").replace("setting", "").strip() or "home"
         return open_windows_settings(page)
 
+    # 1. Check known application aliases and paths
+    if clean_target in COMMON_APP_MAP:
+        for candidate in COMMON_APP_MAP[clean_target]:
+            if os.path.isabs(candidate) and os.path.exists(candidate):
+                try:
+                    subprocess.Popen(f'cmd /c start "" "{candidate}"', cwd=os.path.dirname(candidate), shell=True)
+                    return f"SUCCESS: Launched application '{clean_target}' ({candidate})."
+                except Exception as e:
+                    return f"ERROR launching '{clean_target}' from {candidate}: {str(e)}"
+            elif not os.path.isabs(candidate):
+                try:
+                    subprocess.Popen(f'cmd /c start "" "{candidate}"', shell=True)
+                    return f"SUCCESS: Launched application '{candidate}'."
+                except Exception:
+                    continue
+
+    # 2. Check if direct target is an existing path or expanded environment path
+    expanded = os.path.expandvars(target)
+    if os.path.exists(expanded):
+        try:
+            cwd = os.path.dirname(expanded) if os.path.isfile(expanded) else None
+            subprocess.Popen(f'cmd /c start "" "{expanded}"', cwd=cwd, shell=True)
+            return f"SUCCESS: Launched application from '{expanded}'."
+        except Exception as e:
+            return f"ERROR launching '{expanded}': {str(e)}"
+
+    # 3. Fallback: URI dispatch or standard shell execution
     try:
-        subprocess.Popen(target, shell=True)
-        return f"SUCCESS: Launched application '{target}'."
+        subprocess.Popen(f'cmd /c start "" "{target}"', shell=True)
+        return f"SUCCESS: Dispatched launch for application '{target}'."
     except Exception as e:
         return f"ERROR launching '{target}': {str(e)}"
 
