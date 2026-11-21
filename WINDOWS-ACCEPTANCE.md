@@ -1,7 +1,7 @@
 # Windows J.A.R.V.I.S. Integration Acceptance Report
 
 ## 1. Commit and Environment Details
-- **Integration Commit**: `f83e284` (tracking `origin/codex/windows-integration`)
+- **Integration Commit**: `09e8102` (tracking `origin/codex/windows-integration`)
 - **Git Branch**: `codex/windows-integration`
 - **Host OS**: Windows 11 / Windows 10 (Standard signed-in user session, non-elevated)
 - **Primary Model Provider**: Google Gemini (`gemini-3.5-flash-lite`)
@@ -207,3 +207,42 @@ Tested directly inside the Memory modal's "Test recall" preview tool:
 
 > [!NOTE]
 > These verification tests validate bounded local keyword recall (BM25), optimistic editing, and lifecycle suppression in the owner UI. Local BM25 keyword recall is tested and verified; semantic retrieval and full-history compaction are not implemented.
+
+---
+
+## 8. Natural Conversation, Context Window, and Voice Loop Validation
+
+Deployed and verified commits `fa1e9c3` and `09e8102`:
+- Natural persona directives in `SOUL.md`.
+- `model_window` bounded context pruning (24,000-character target / 6 turns max; preserves active tool chain and exact Google thought signatures; excerpts oversized tool outputs without mutating saved disk sessions).
+- Bounded model timeout recovery (30s per-call timeout; same-model retry preserving signed history; non-replaying failure handling).
+- Continuous voice conversation controller (`frontend/src/voice/VoiceConversation.ts`) with multi-turn listen/reply loop, playback pause, and interim transcription.
+- Status strip accuracy updates (`Starting microphone`, `Speaking`, `Preparing voice reply`).
+
+### A. Preserved Long Session Diagnostic Validation (Session `74d6e820`)
+- **Evaluation**: Evaluated preserved 106-message session `74d6e820` with `model_window` and harmless query `"Answer READY only, do not perform actions."` with `tool_choice="none"`.
+- **Metrics**:
+  - **Old Serialized Character Count**: `128,786` characters (~129 KB)
+  - **New Serialized Character Count**: `19,968` characters (~20 KB, within 24k target)
+  - **Elapsed Latency**: `1.533s` (down from client socket timeout)
+  - **Model Response**: `'READY'` (Success / `200 OK`)
+  - **Integrity**: Saved disk session `74d6e820.json` and all 41 Google thought signatures preserved without modification.
+
+### B. Live Natural Chat Verification (Session `5540df48`)
+Tested live through the deployed UI on `http://localhost:8000/` in a fresh conversation:
+1. **Turn 1 (Greeting)**:
+   - **User Prompt**: `hey`
+   - **Assistant Response**: `Hey! What's on your mind today?`
+   - **Verification**: Natural, concise reply; zero awkward status boasts or unnecessary honorific titles; zero tool calls.
+2. **Turn 2 (Negative Constraint & Safe Drafting)**:
+   - **User Prompt**: `Draft a WhatsApp message saying I will be five minutes late. Do not open WhatsApp or send anything.`
+   - **Assistant Response**:
+     > Here is a draft for your message:
+     >
+     > "Hey, just running a few minutes behind—I'll be there in about 5 minutes!"
+   - **Verification**: Correctly drafted message text; zero raw inference errors; zero tool calls dispatched (`tool_calls: null`, respecting negative constraint without launching WhatsApp or sending messages).
+3. **Artifact Link**: [conversation_voice_fix_verified.png](file:///C:/Users/asha0/.gemini/antigravity/brain/10f936d3-63ca-470e-8451-1aa2cc7f0aef/conversation_voice_fix_verified.png)
+
+### C. Voice Conversation Controls & Hardware Boundary
+- **UI Controls**: Deployed composer verifies presence of the `Start voice conversation` button and state-aware status transitions (`Ready to talk`, `Working on your request`, `Speaking`).
+- **Hardware Boundary Disclaimer**: Unit tests and simulated browser loops pass (5 TAP tests in `npm run test:voice`). Physical microphone capture, physical audio audibility, and hardware voice barge-in remain separate unverified hardware items and are not claimed based on simulated tests. Physical microphone was not triggered during live testing to avoid unexpected recording while the laptop is in use.
