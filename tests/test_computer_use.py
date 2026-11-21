@@ -73,3 +73,84 @@ def test_open_app_settings_delegation():
     res = open_app("microphone settings")
     assert "SUCCESS: Opened Windows Settings" in res
     assert "privacy-microphone" in res
+
+def test_pyautogui_failsafe_intact():
+    import pyautogui
+    from tools.computer_use_tools import mouse_move, mouse_click
+    assert pyautogui.FAILSAFE is True
+    # Test that mouse functions keep FAILSAFE enabled
+    mouse_move(10, 10, duration=0.01)
+    assert pyautogui.FAILSAFE is True
+
+def test_is_desktop_available_real():
+    from tools.computer_use_tools import is_desktop_available
+    available, msg = is_desktop_available()
+    assert isinstance(available, bool)
+    assert isinstance(msg, str)
+
+def test_is_desktop_available_mocked_locked():
+    from unittest.mock import patch
+    import sys
+    from tools.computer_use_tools import is_desktop_available
+
+    with patch("ctypes.windll.user32.OpenInputDesktop", return_value=0):
+        available, msg = is_desktop_available()
+        assert available is False
+        assert "DESKTOP_UNAVAILABLE" in msg
+
+def test_verify_foreground_window_mismatch():
+    from tools.computer_use_tools import verify_foreground_window
+    matched, msg = verify_foreground_window("non_existent_application_xyz_9999")
+    assert matched is False
+    assert "WINDOW_MISMATCH" in msg
+
+def test_verify_foreground_window_mock_match():
+    from unittest.mock import patch
+    import ctypes
+    from tools.computer_use_tools import verify_foreground_window
+
+    def mock_get_window_text_w(hwnd, buff, length):
+        buff.value = "Calculator"
+        return len(buff.value)
+
+    def mock_get_class_name_w(hwnd, buff, length):
+        buff.value = "ApplicationFrameWindow"
+        return len(buff.value)
+
+    with patch("ctypes.windll.user32.GetForegroundWindow", return_value=12345):
+        with patch("ctypes.windll.user32.GetWindowTextLengthW", return_value=10):
+            with patch("ctypes.windll.user32.GetWindowTextW", side_effect=mock_get_window_text_w):
+                with patch("ctypes.windll.user32.GetClassNameW", side_effect=mock_get_class_name_w):
+                    with patch("ctypes.windll.user32.GetWindowThreadProcessId", return_value=0):
+                        matched, msg = verify_foreground_window("calculator")
+                        assert matched is True
+                        assert "VERIFIED" in msg
+
+def test_session_cancellation_lifecycle():
+    from core.session import Session
+    sess = Session(session_id="test_cancel_sess")
+    assert sess.is_cancelled is False
+
+    sess.cancel()
+    assert sess.is_cancelled is True
+
+    sess.reset_cancellation()
+    assert sess.is_cancelled is False
+
+def test_approval_manager_cancellation_flow():
+    from core.approvals import ApprovalManager
+    am = ApprovalManager()
+    req = am.create_request(
+        session_id="sess_test_123",
+        tool="run_elevated_command",
+        args={"command": "dir"},
+        policy_level="CRITICAL",
+        summary="Test critical action"
+    )
+    assert req.status == "PENDING"
+    assert not req.event.is_set()
+
+    am.cancel_session_approvals("sess_test_123")
+    assert req.status == "CANCELLED"
+    assert req.event.is_set()
+

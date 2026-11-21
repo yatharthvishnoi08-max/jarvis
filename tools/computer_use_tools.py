@@ -107,6 +107,68 @@ COMMON_APP_MAP = {
     ]
 }
 
+def is_desktop_available() -> tuple[bool, str]:
+    """
+    Checks whether the interactive desktop station is active and accessible.
+    Returns (True, "DESKTOP_AVAILABLE") or (False, "DESKTOP_UNAVAILABLE: Desktop is locked or inaccessible.")
+    """
+    if os.name != "nt":
+        return True, "DESKTOP_AVAILABLE"
+    try:
+        import ctypes
+        u = ctypes.windll.user32
+        hDesk = u.OpenInputDesktop(0, False, 0x0100)  # DESKTOP_READOBJECTS
+        if not hDesk or hDesk == 0:
+            return False, "DESKTOP_UNAVAILABLE: Windows desktop is locked, disconnected, or station is inaccessible."
+        u.CloseDesktop(hDesk)
+        return True, "DESKTOP_AVAILABLE"
+    except Exception as e:
+        return False, f"DESKTOP_UNAVAILABLE: Error checking desktop accessibility: {str(e)}"
+
+def verify_foreground_window(expected_keyword: str) -> tuple[bool, str]:
+    """
+    Verifies that the currently visible foreground window matches the expected application or keyword.
+    Prevents sending keyboard/mouse input into an unintended foreground window.
+    """
+    if os.name != "nt":
+        return True, "VERIFIED"
+
+    try:
+        import ctypes
+        from tools.multimodal_tools import _ensure_input_desktop
+        _ensure_input_desktop()
+
+        u = ctypes.windll.user32
+        fg = u.GetForegroundWindow()
+        if not fg:
+            return False, "WINDOW_MISMATCH: No foreground window is currently active."
+
+        length = u.GetWindowTextLengthW(fg)
+        buff = ctypes.create_unicode_buffer(length + 1)
+        u.GetWindowTextW(fg, buff, length + 1)
+        title = buff.value
+
+        cls_buff = ctypes.create_unicode_buffer(256)
+        u.GetClassNameW(fg, cls_buff, 256)
+        cls_name = cls_buff.value
+
+        w_pid = ctypes.c_ulong()
+        u.GetWindowThreadProcessId(fg, ctypes.byref(w_pid))
+
+        proc_name = ""
+        try:
+            proc_name = psutil.Process(w_pid.value).name().lower()
+        except Exception:
+            pass
+
+        kw = expected_keyword.lower().strip()
+        if kw in title.lower() or kw in cls_name.lower() or kw in proc_name:
+            return True, f"VERIFIED: Foreground window is '{title}' (Class: '{cls_name}', PID: {w_pid.value})"
+
+        return False, f"WINDOW_MISMATCH: Foreground window is '{title}' (Class: '{cls_name}', Process: '{proc_name}'), expected '{expected_keyword}'."
+    except Exception as e:
+        return False, f"ERROR checking foreground window: {str(e)}"
+
 def get_mouse_position() -> str:
     """Returns the current mouse cursor (x, y) coordinates and screen dimensions."""
     if not PYAUTOGUI_AVAILABLE:
@@ -123,6 +185,7 @@ def mouse_move(x: int, y: int, duration: float = 0.2) -> str:
     if not PYAUTOGUI_AVAILABLE:
         return "ERROR: PyAutoGUI is not available."
     try:
+        pyautogui.FAILSAFE = True
         w, h = pyautogui.size()
         target_x = max(0, min(x, w - 1))
         target_y = max(0, min(y, h - 1))
@@ -145,6 +208,7 @@ def mouse_click(
     if not PYAUTOGUI_AVAILABLE:
         return "ERROR: PyAutoGUI is not available."
     try:
+        pyautogui.FAILSAFE = True
         btn = button.lower().strip()
         if btn not in ["left", "right", "middle"]:
             btn = "left"
@@ -399,6 +463,14 @@ def _bring_app_window_to_foreground(keyword: str, timeout: float = 3.0) -> bool:
         SW_RESTORE = 9
         WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.wintypes.HWND, ctypes.wintypes.LPARAM)
 
+        matching_pids = set()
+        try:
+            for p in psutil.process_iter(['pid', 'name']):
+                if keyword.lower() in (p.info['name'] or '').lower():
+                    matching_pids.add(p.info['pid'])
+        except Exception:
+            pass
+
         start = time.time()
         while time.time() - start < timeout:
             hwnds = []
@@ -413,9 +485,17 @@ def _bring_app_window_to_foreground(keyword: str, timeout: float = 3.0) -> bool:
                 u.GetClassNameW(hwnd, cls_buff, 256)
                 cls_name = cls_buff.value
 
+                w_pid = ctypes.wintypes.DWORD()
+                u.GetWindowThreadProcessId(hwnd, ctypes.byref(w_pid))
+
                 kw = keyword.lower()
-                if kw in title.lower() or kw in cls_name.lower():
-                    hwnds.append(hwnd)
+                if w_pid.value in matching_pids:
+                    # Ignore background helper classes like QTrayIconMessageWindowClass or MediaControls
+                    if "trayicon" not in cls_name.lower() and "mediacontrols" not in cls_name.lower():
+                        hwnds.append(hwnd)
+                elif kw in title.lower() or kw in cls_name.lower():
+                    if "trayicon" not in cls_name.lower():
+                        hwnds.append(hwnd)
                 return True
 
             u.EnumWindows(WNDENUMPROC(enum_cb), 0)
