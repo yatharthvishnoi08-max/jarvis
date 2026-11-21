@@ -5,7 +5,7 @@ import { useAudioStore } from '../stores/useAudioStore';
 import { useVoiceStore } from '../stores/useVoiceStore';
 
 /** Mounted once for the whole authenticated app, including Planner and Settings. */
-export function VoiceAssistant({onUnsent}: {onUnsent: (text: string) => void}) {
+export function VoiceAssistant({onUnsent, onWake}: {onUnsent: (text: string) => void; onWake: () => void}) {
   const retry = useVoiceStore(s => s.retry);
   useEffect(() => {
     const Recognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -23,7 +23,7 @@ export function VoiceAssistant({onUnsent}: {onUnsent: (text: string) => void}) {
         return accepted;
       },
       listening: value => useJarvisStore.getState().setIsListening(value),
-      awake: value => { useJarvisStore.getState().setVoiceConversation(value); if (value) useJarvisStore.getState().setVoiceEnabled(true); },
+      awake: value => { useJarvisStore.getState().setVoiceConversation(value); if (value) { useJarvisStore.getState().setVoiceEnabled(true); onWake(); } },
       transcript: text => useVoiceStore.setState({transcript: text}),
       interrupt: () => useJarvisStore.getState().interruptSpeech(),
       error: hint => useVoiceStore.setState({hint}),
@@ -59,6 +59,6 @@ export function VoiceAssistant({onUnsent}: {onUnsent: (text: string) => void}) {
     }
     sync();
     return () => { disposed = true; unsub.forEach(fn => fn()); controller.stop(); release?.(); };
-  }, [onUnsent, retry]);
+  }, [onUnsent, onWake, retry]);
   return null;
 }

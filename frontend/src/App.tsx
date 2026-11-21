@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Activity, AudioLines, Bell, Brain, ChevronsUpDown, CircleUser, Folder, Inbox, LayoutDashboard, ListChecks, LogOut, Menu, Network, Plus, Settings2, ShieldAlert, Trash2, Users, Volume2, VolumeX, X } from 'lucide-react';
 import { useAuthStore } from './stores/useAuthStore';
 import { useJarvisStore } from './stores/useJarvisStore';
@@ -36,6 +36,7 @@ export function App() {
   const [menu,setMenu]=useState(false);
   const [draft,setDraft]=useState('');
   const [sessionError,setSessionError]=useState('');
+  const showVoiceChat=useCallback(()=>{setPage('Talk');setPanel(null);},[]);
   const online=ws?.readyState===WebSocket.OPEN;
   const playbackState=useAudioStore(s=>s.playbackState);
   useEffect(()=>{void checkAuth();},[checkAuth]);
@@ -62,7 +63,7 @@ export function App() {
   const busy=orbState==='thinking'||orbState==='acting';
   const phase=orbState==='error' && !pendingApprovals.length?'Check gateway status':!online?'Gateway offline':pendingApprovals.length?'Approval needed':busy?'Working on your request':playbackState==='speaking'?'Speaking — talk to interrupt':isListening?'Microphone on':['generating','buffering'].includes(playbackState)?'Preparing voice reply':'Ready to talk';
   return <div className="jarvis-shell network-shell">
-    <VoiceAssistant onUnsent={setDraft}/>
+    <VoiceAssistant onUnsent={setDraft} onWake={showVoiceChat}/>
     {menu && <button className="rail-backdrop" onClick={()=>setMenu(false)} aria-label="Close navigation"/>}
     <aside className={'network-rail '+(menu?'opened':'')} aria-label="Sidebar">
       <div className="rail-brand"><span className="mini-core"/>Jarvis<button onClick={()=>setMenu(false)} aria-label="Close navigation"><X size={18}/></button></div>
