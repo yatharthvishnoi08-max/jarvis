@@ -1,4 +1,6 @@
 import asyncio
+import os
+import tempfile
 import re
 import json
 import time
@@ -75,10 +77,18 @@ class Session:
             "updated_at": self.updated_at,
             "messages": self.messages
         }
+        temporary = None
         try:
-            file_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
-        except Exception as e:
-            print(f"[Session Save Error]: {e}")
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=SESSIONS_DIR,
+                                             suffix=".tmp", delete=False) as output:
+                temporary = Path(output.name)
+                json.dump(data, output, indent=2)
+                output.flush()
+                os.fsync(output.fileno())
+            os.replace(temporary, file_path)
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
 
     @classmethod
     def load(cls, session_id: str) -> Optional['Session']:

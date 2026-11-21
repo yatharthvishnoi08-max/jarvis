@@ -28,7 +28,7 @@ type View = typeof navigation[number][0] | 'Account';
 export function App() {
   const {isAuthenticated,isLoading,checkAuth,logout}=useAuthStore();
   const {connectWebSocket,disconnectWebSocket,ws,sessions,currentSessionId,switchSession,createSession,deleteSession,
-    messages,orbState,voiceEnabled,setVoiceEnabled,pendingApprovals,isListening,triggerEmergencyStop}=useJarvisStore();
+    messages,actionError,orbState,voiceEnabled,setVoiceEnabled,pendingApprovals,isListening,triggerEmergencyStop}=useJarvisStore();
   const [page,setPage]=useState<'Network'|'Talk'|'Planner'|'Inbox'|'Calendar'|'Needs you'>('Network');
   const [panel,setPanel]=useState<View|null>(null);
   const [menu,setMenu]=useState(false);
@@ -74,6 +74,7 @@ export function App() {
     <div className="network-workspace"><header className="network-title"><button onClick={()=>setMenu(true)} aria-label="Open navigation"><Menu size={18}/></button>
       <h1>{page}</h1><button className="halt" onClick={triggerEmergencyStop} aria-label="Emergency stop" title="Emergency stop"><ShieldAlert size={16}/></button></header>
       <main className="network-surface">
+        {actionError && <p className="action-error" role="alert">{actionError}</p>}
         {page==='Needs you'?<Decisions/>:page==='Planner' ? <Planner/> : page==='Inbox'||page==='Calendar' ? <WorkspaceInbox key={page} initial={page}/> : <>
         {page==='Network'?<><NetworkMap online={online} approvals={pendingApprovals.length} onOpen={open} onActivity={()=>open('Activity')}/>
           <div className="network-transcript" aria-live="polite">

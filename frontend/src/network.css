@@ -106,3 +106,5 @@
 .decisions li h3 {margin:.3rem 0;font-size:1rem;overflow-wrap:anywhere;}
 .decisions li button {border-radius:1rem;padding:.35rem .7rem;flex-shrink:0;}
 .decisions li a {display:inline-flex;align-items:center;gap:.3rem;color:#e0b7ca;font-size:.8rem;}
+
+.action-error {padding:.75rem 1rem;background:#482932;color:#ffe2eb;font-size:.85rem;}
