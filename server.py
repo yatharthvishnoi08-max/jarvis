@@ -3,6 +3,8 @@ import json
 import time
 import socket
 import asyncio
+import traceback
+import uuid
 from contextlib import asynccontextmanager
 import psutil
 from pathlib import Path
@@ -607,10 +609,21 @@ async def websocket_endpoint(websocket: WebSocket):
                      429: "The model is busy or its allowance is exhausted. Try again later."}
             await send_event({"type": "error", "session_id": sess.id,
                               "message": hints.get(exc.status_code, "The model provider rejected this request. Please retry.")})
-        except Exception:
-            # Do not send provider payloads, prompts or credentials to logs/the UI.
+        except Exception as exc:
+            # Keep actionable locations, never exception text, source lines,
+            # local variables, provider payloads, prompts or credentials.
+            reference = uuid.uuid4().hex[:10]
+            frames = traceback.extract_tb(exc.__traceback__)
+            locations = [f"{Path(frame.filename).name}:{frame.lineno}" for frame in frames[-6:]]
+            audit_logger.log_event(
+                event_type="TURN_FAILED", session_id=sess.id, status="ERROR",
+                detail=f"{type(exc).__name__}; reference {reference}",
+                reference=reference, error_type=type(exc).__name__, locations=locations,
+            )
             await send_event({"type": "error", "session_id": sess.id,
-                              "message": "Jarvis could not complete this message. Check the host connection and storage, then retry."})
+                              "reference": reference,
+                              "message": f"Jarvis could not complete this message. Error reference: {reference}. "
+                                         "Check Activity for details. Completed actions are saved; inspect them before retrying."})
         finally:
             if active_turns.get(sess.id) is asyncio.current_task():
                 active_turns.pop(sess.id, None)

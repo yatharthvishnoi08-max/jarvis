@@ -23,6 +23,9 @@ def gateway(tmp_path, monkeypatch):
 
 def test_provider_failure_is_visible_and_same_socket_can_retry(gateway, monkeypatch):
     attempts = []
+    from unittest.mock import Mock
+    log = Mock()
+    monkeypatch.setattr(gateway.audit_logger, 'log_event', log)
     async def reply(**kwargs):
         attempts.append(kwargs['user_input'])
         if len(attempts) == 1:
@@ -35,6 +38,12 @@ def test_provider_failure_is_visible_and_same_socket_can_retry(gateway, monkeypa
         result = ws.receive_json()
         assert result['type'] == 'error' and result['session_id'] == 'failure-test'
         assert 'private-provider-payload' not in str(result)
+        event = log.call_args.kwargs
+        assert event['event_type'] == 'TURN_FAILED'
+        assert event['error_type'] == 'ValueError'
+        assert event['reference'] == result['reference']
+        assert any(location.startswith('test_websocket_lifecycle.py:') for location in event['locations'])
+        assert 'private-provider-payload' not in str(event)
         ws.send_json({'type': 'ping'})
         assert ws.receive_json()['type'] == 'pong'
         ws.send_json(turn)
