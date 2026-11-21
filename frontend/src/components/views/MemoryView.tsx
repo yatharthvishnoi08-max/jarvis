@@ -1,145 +1,127 @@
 import React, { useEffect, useState } from 'react';
 import { useAuthStore } from '../../stores/useAuthStore';
-import { Brain, X, Plus, Search, Check } from 'lucide-react';
+import { Brain, X, Plus, Search, Pencil, Archive, RotateCcw } from 'lucide-react';
 
-interface MemoryViewProps {
-  isOpen: boolean;
-  onClose: () => void;
+interface MemoryRecord {
+  id: number; category: string; rule: string; source: string;
+  updated_at: string; expires_at: string | null; archived: number; expired: boolean; version: number;
 }
+interface MemoryViewProps { isOpen: boolean; onClose: () => void }
 
 export const MemoryView: React.FC<MemoryViewProps> = ({ isOpen, onClose }) => {
-  const [memory, setMemory] = useState('');
-  const [category, setCategory] = useState('WORKFLOW');
+  const [records, setRecords] = useState<MemoryRecord[]>([]);
+  const [category, setCategory] = useState('USER_PREF');
   const [ruleText, setRuleText] = useState('');
+  const [expiry, setExpiry] = useState('');
+  const [editing, setEditing] = useState<MemoryRecord | null>(null);
   const [search, setSearch] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showInactive, setShowInactive] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [msg, setMsg] = useState('');
   const { token } = useAuthStore();
+  const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
 
+  const request = async (url: string, init?: RequestInit) => {
+    const res = await fetch(url, { ...init, headers });
+    if (!res.ok) {
+      const detail = await res.json().catch(() => ({}));
+      throw new Error(typeof detail.detail === 'string' ? detail.detail : `Request failed (${res.status}). Please try again.`);
+    }
+    return res.json();
+  };
   const fetchMemory = async () => {
-    try {
-      const res = await fetch('/api/memory', {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setMemory(data.memory || '');
-      }
-    } catch (err) {
-      console.error('Failed to fetch memory:', err);
-    }
+    const data = await request('/api/memory');
+    if (!Array.isArray(data.records)) throw new Error('The host needs the memory update. Your existing memories are still stored there.');
+    setRecords(data.records);
   };
-
+  const reload = async () => {
+    setLoading(true); setError('');
+    try { await fetchMemory(); } catch (err) { setError((err as Error).message); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { if (isOpen) void reload(); }, [isOpen, token]);
   useEffect(() => {
-    if (isOpen) {
-      fetchMemory();
-    }
-  }, [isOpen]);
+    if (!isOpen) return;
+    const close = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', close);
+    return () => window.removeEventListener('keydown', close);
+  }, [isOpen, onClose]);
 
-  const handleAddRule = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!ruleText.trim()) return;
-
-    setIsSubmitting(true);
+  const resetForm = () => { setEditing(null); setRuleText(''); setExpiry(''); setCategory('USER_PREF'); };
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault(); setBusy(true); setError(''); setMsg('');
     try {
-      const res = await fetch('/api/memory', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
-        },
-        body: JSON.stringify({ category, rule: ruleText.trim() })
+      const values = { category, rule: ruleText.trim(), expires_at: expiry ? new Date(expiry).toISOString() : null };
+      await request(editing ? `/api/memory/${editing.id}` : '/api/memory', {
+        method: editing ? 'PUT' : 'POST',
+        body: JSON.stringify(editing ? { ...values, version: editing.version, action: 'edit' } : values),
       });
-      if (res.ok) {
-        setMsg('Rule logged to persistent memory.');
-        setRuleText('');
-        fetchMemory();
-        setTimeout(() => setMsg(''), 3000);
-      }
-    } catch (err) {
-      console.error('Failed to add memory rule:', err);
-    } finally {
-      setIsSubmitting(false);
-    }
+      resetForm();
+      setMsg('Saved. Jarvis will use this memory on your next message.');
+      await fetchMemory();
+    } catch (err) { setError((err as Error).message); }
+    finally { setBusy(false); }
   };
-
+  const change = async (record: MemoryRecord, action: string) => {
+    setBusy(true); setError(''); setMsg('');
+    try {
+      await request(`/api/memory/${record.id}`, { method: 'PUT', body: JSON.stringify({ version: record.version, action }) });
+      if (editing?.id === record.id) resetForm();
+      setMsg(action === 'archive' ? 'Archived. Jarvis will stop using it. Restore it from Archived & expired.' : 'Memory updated.');
+      await fetchMemory();
+    } catch (err) { setError((err as Error).message); }
+    finally { setBusy(false); }
+  };
+  const edit = (record: MemoryRecord) => {
+    setEditing(record); setCategory(record.category); setRuleText(record.rule); setError(''); setMsg('');
+    const date = record.expires_at ? new Date(record.expires_at) : null;
+    setExpiry(date ? new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16) : '');
+  };
   if (!isOpen) return null;
-
-  const filteredLines = search
-    ? memory.split('\n').filter((line) => line.toLowerCase().includes(search.toLowerCase()))
-    : memory.split('\n');
+  const visible = records.filter(r => (showInactive ? r.archived || r.expired : !r.archived && !r.expired)
+    && `${r.rule} ${r.category}`.toLowerCase().includes(search.toLowerCase()));
+  const inputClass = 'w-full min-w-0 rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-pink-300';
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6 animate-fade-in">
-      <div className="bg-obsidian-900 border border-slate-800 rounded-2xl w-full max-w-3xl h-[80vh] flex flex-col shadow-2xl overflow-hidden">
-        {/* Header */}
-        <div className="p-4 border-b border-slate-800 flex items-center justify-between shrink-0">
-          <div className="flex items-center space-x-2">
-            <Brain className="w-5 h-5 text-jarvis-cyan" />
-            <h2 className="text-base font-bold text-cyan-300 hud-title tracking-wider uppercase">
-              JARVIS Persistent Memory & Heuristics
-            </h2>
-          </div>
-          <button onClick={onClose} className="p-1 text-slate-400 hover:text-white">
-            <X className="w-5 h-5" />
-          </button>
+    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6">
+      <section role="dialog" aria-modal="true" aria-labelledby="memory-title" className="bg-[#19191b] border border-white/10 rounded-3xl w-full max-w-3xl max-h-[90dvh] flex flex-col shadow-2xl overflow-hidden text-slate-200">
+        <header className="p-5 border-b border-white/10 flex items-start justify-between shrink-0 gap-3">
+          <div><div className="flex items-center gap-2"><Brain className="w-5 h-5 text-pink-300" /><h2 id="memory-title" className="font-semibold text-lg">Your memory</h2></div>
+            <p className="text-xs text-slate-400 mt-2">What Jarvis remembers. Correct it, give it an expiry, or set it aside.</p></div>
+          <button onClick={onClose} aria-label="Close memory" className="p-2 rounded-full hover:bg-white/10"><X size={18} /></button>
+        </header>
+        <div className="px-5 py-3 border-b border-white/10 flex flex-wrap items-center gap-3">
+          <label className="flex items-center gap-2 flex-1 min-w-0"><Search size={16} className="text-slate-500 shrink-0" /><input aria-label="Search memories" placeholder="Search memories" value={search} onChange={e => setSearch(e.target.value)} className="bg-transparent min-w-0 w-full text-sm outline-none" /></label>
+          <button onClick={() => setShowInactive(!showInactive)} className="text-xs text-pink-200 rounded-lg px-2 py-2 hover:bg-white/5">{showInactive ? 'Active memories' : 'Archived & expired'}</button>
+          <button disabled={busy} onClick={() => void reload()} className="text-xs text-slate-400">Reload</button>
         </div>
-
-        {/* Search Bar */}
-        <div className="p-3 border-b border-slate-800/80 bg-obsidian-950/60 flex items-center space-x-2">
-          <Search className="w-4 h-4 text-slate-500 ml-1" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search learned rules and habits..."
-            className="flex-1 bg-transparent text-xs text-slate-200 placeholder-slate-500 focus:outline-none font-mono"
-          />
+        {error && <p role="alert" className="mx-5 mt-3 p-3 rounded-xl bg-red-400/10 text-red-200 text-sm">{error}</p>}
+        {msg && <p role="status" className="px-5 pt-3 text-xs text-emerald-300">{msg}</p>}
+        <div className="flex-1 min-h-0 overflow-y-auto p-5 space-y-3">
+          {loading ? <p className="text-sm text-slate-400">Loading memories…</p> : visible.length === 0 && !error ? <p className="text-sm text-slate-400">{search ? 'No matching memories.' : showInactive ? 'No archived or expired memories.' : 'Add a preference below, or ask Jarvis to remember one in chat.'}</p> : null}
+          {visible.map(record => <article key={record.id} className="rounded-2xl bg-white/[0.03] border border-white/10 p-4">
+            <div className="flex gap-2 items-center flex-wrap text-[10px] uppercase tracking-widest text-pink-200"><span>{record.category.replace(/_/g, ' ')}</span>{!!record.archived && <span className="text-slate-400">Archived</span>}{record.expired && <span className="text-amber-300">Expired</span>}</div>
+            <p className="text-sm leading-relaxed my-2 whitespace-pre-wrap break-words">{record.rule}</p>
+            <p className="text-[11px] text-slate-500">{record.source} · Updated {new Date(record.updated_at).toLocaleDateString()}{record.expires_at ? ` · Expires ${new Date(record.expires_at).toLocaleString()}` : ''}</p>
+            <div className="flex flex-wrap gap-4 mt-3 text-xs text-slate-400">
+              <button disabled={busy} onClick={() => edit(record)} className="flex gap-1 items-center hover:text-pink-200"><Pencil size={13} />Edit</button>
+              <button disabled={busy} onClick={() => void change(record, record.archived ? 'restore' : 'archive')} className="flex gap-1 items-center hover:text-pink-200"><Archive size={13} />{record.archived ? 'Restore' : 'Archive'}</button>
+              {record.version > 1 && <button disabled={busy} onClick={() => void change(record, 'undo')} className="flex gap-1 items-center hover:text-pink-200"><RotateCcw size={13} />Undo last change</button>}
+            </div>
+          </article>)}
         </div>
-
-        {/* Memory Content */}
-        <div className="flex-1 p-4 overflow-y-auto font-mono text-xs text-slate-300 leading-relaxed whitespace-pre-wrap bg-obsidian-950/40">
-          {filteredLines.join('\n')}
-        </div>
-
-        {/* Add Rule Form */}
-        <form onSubmit={handleAddRule} className="p-4 border-t border-slate-800 bg-obsidian-900 space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-mono font-semibold text-cyan-400">Add Learned Rule / Habit:</span>
-            {msg && <span className="text-xs text-emerald-400 font-mono">{msg}</span>}
-          </div>
-
-          <div className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-2">
-            <select
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-              className="bg-obsidian-850 border border-slate-800 rounded-lg px-2.5 py-2 text-xs text-slate-200 focus:outline-none focus:border-cyan-500 font-mono"
-            >
-              <option value="WORKFLOW">WORKFLOW</option>
-              <option value="POWERSHELL">POWERSHELL</option>
-              <option value="USER_PREF">USER_PREF</option>
-              <option value="SAFETY">SAFETY</option>
-            </select>
-
-            <input
-              type="text"
-              value={ruleText}
-              onChange={(e) => setRuleText(e.target.value)}
-              placeholder="e.g. Wrap all paths containing spaces in double quotes..."
-              className="flex-1 bg-obsidian-850 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500 font-mono"
-            />
-
-            <button
-              type="submit"
-              disabled={isSubmitting || !ruleText.trim()}
-              className="px-4 py-2 rounded-lg bg-jarvis-cyan text-obsidian-950 text-xs font-bold font-mono hover:bg-cyan-400 disabled:opacity-30 transition flex items-center justify-center space-x-1"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Record</span>
-            </button>
+        <form onSubmit={save} className="shrink-0 p-4 sm:p-5 border-t border-white/10 space-y-3">
+          <div className="flex items-center justify-between text-sm"><span>{editing ? 'Edit memory' : 'Remember something'}</span>{editing && <button type="button" onClick={resetForm} className="text-xs text-slate-400">Cancel edit</button>}</div>
+          <textarea required aria-label="Memory text" maxLength={4000} rows={2} value={ruleText} onChange={e => setRuleText(e.target.value)} placeholder="I prefer short replies and a morning plan at 9." className={inputClass} />
+          <div className="flex flex-wrap items-end gap-3">
+            <label className="text-[11px] text-slate-400 flex-1 min-w-[100px]">Category<input aria-label="Memory category" maxLength={40} required value={category} onChange={e => setCategory(e.target.value)} className={`${inputClass} mt-1`} /></label>
+            <label className="text-[11px] text-slate-400 flex-1 min-w-[180px]">Expiry (optional)<input aria-label="Memory expiry" type="datetime-local" value={expiry} onChange={e => setExpiry(e.target.value)} className={`${inputClass} mt-1 [color-scheme:dark]`} /></label>
+            <button disabled={busy || loading || !ruleText.trim()} type="submit" className="flex gap-1 items-center justify-center rounded-xl bg-pink-200 text-[#24171d] px-4 py-3 text-sm font-semibold disabled:opacity-40"><Plus size={16} />{busy ? 'Saving…' : 'Save'}</button>
           </div>
         </form>
-      </div>
+      </section>
     </div>
   );
 };

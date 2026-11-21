@@ -1,5 +1,6 @@
 from pathlib import Path
 from datetime import datetime
+from tools import memory_store
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 EMPLOYEES_DIR = BASE_DIR / "agents" / "employees"
@@ -48,19 +49,14 @@ def update_employee_sop(employee_name: str, feedback_or_new_rule: str) -> str:
 def log_learned_rule(category: str, rule: str) -> str:
     """Logs a system-wide lesson, user preference, or operational rule into persistent memory."""
     try:
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-        entry = f"\n- **[{category.upper()}]** ({timestamp}): {rule}\n"
-        with open(MEMORY_FILE, "a", encoding="utf-8") as f:
-            f.write(entry)
-        return f"SUCCESS: Logged rule under category '{category}' into persistent memory."
+        record = memory_store.add_memory(category, rule, source="Jarvis memory tool")
+        return f"SUCCESS: Saved memory #{record['id']} under '{record['category']}'."
     except Exception as e:
         return f"ERROR logging rule: {str(e)}"
 
 def read_memory() -> str:
     """Reads all learned rules, user preferences, and operational memories."""
     try:
-        if not MEMORY_FILE.exists():
-            return "(Memory file does not exist yet.)"
-        return MEMORY_FILE.read_text(encoding="utf-8")
+        return memory_store.memory_text()
     except Exception as e:
         return f"ERROR reading memory: {str(e)}"

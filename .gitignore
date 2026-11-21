@@ -33,4 +33,5 @@ web_dist/
 memory/sessions/*.json
 memory/audit.jsonl
 memory/planner.sqlite3*
+memory/memories.sqlite3*
 
