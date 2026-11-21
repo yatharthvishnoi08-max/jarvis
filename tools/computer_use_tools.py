@@ -602,15 +602,18 @@ def open_app(target: str) -> str:
     else:
         # Fallback for URI schemes, system PATH executables, or commands
         try:
-            subprocess.Popen(f'cmd /c start "" "{target}"', shell=True)
+            subprocess.Popen(f'cmd /c start "" "{resolved_path or target}"', shell=True)
         except Exception as e:
             return f"ERROR launching '{target}': {str(e)}"
 
     # Polling verification: open_app MUST NOT claim SUCCESS solely because launch was dispatched; verify visible foreground!
-    _bring_app_window_to_foreground(clean_target, timeout=2.5)
+    expected_window = {"tg": "telegram", "vscode": "code", "task_manager": "taskmgr"}.get(clean_target, clean_target)
+    if os.path.isabs(target):
+        expected_window = os.path.splitext(os.path.basename(target))[0]
+    _bring_app_window_to_foreground(expected_window, timeout=2.5)
     start = time.time()
     while time.time() - start < 4.0:
-        verified, _ = verify_foreground_window(clean_target)
+        verified, _ = verify_foreground_window(expected_window)
         if verified:
             return f"SUCCESS: Opened application '{clean_target}' and verified visible in foreground."
         time.sleep(0.3)
@@ -734,18 +737,20 @@ def click_screen_element(
             return f"NOTICE: Could not parse localization coordinates for '{target_description}'. Gemini response: {reply}"
 
         coord_data = json.loads(match.group(0))
-        if not coord_data.get("found"):
+        if coord_data.get("found") is not True:
             return f"NOTICE: UI element '{target_description}' was not found on screen. Reason: {coord_data.get('reason', 'Not visible')}"
 
-        click_x = int(coord_data.get("x", 0))
-        click_y = int(coord_data.get("y", 0))
-
-        # Clamp to screen bounds
-        click_x = max(0, min(click_x, screen_w - 1))
-        click_y = max(0, min(click_y, screen_h - 1))
+        if not 0.75 <= float(coord_data.get("confidence", 0)) <= 1.0:
+            return "ERROR: Visual target confidence is too low. Inspect the current screen before retrying."
+        click_x = int(coord_data["x"])
+        click_y = int(coord_data["y"])
+        if not (0 <= click_x < screen_w and 0 <= click_y < screen_h):
+            return "ERROR: Visual target coordinates are outside the captured screen. No click was sent."
 
         # Perform the click
-        click_res = mouse_click(x=click_x, y=click_y, button=button, clicks=clicks)
+        click_res = mouse_click(target_window=target_window, x=click_x, y=click_y, button=button, clicks=clicks)
+        if not click_res.startswith("SUCCESS:"):
+            return click_res
         return (
             f"SUCCESS: Visual grounding located '{target_description}' at ({click_x}, {click_y}) "
             f"[{coord_data.get('element', '')}]. {click_res}"

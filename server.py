@@ -108,8 +108,12 @@ def is_local_request(request: Request) -> bool:
     if not is_loopback:
         return False
 
-    host_header = (request.headers.get("host") or "").split(":")[0].lower()
-    is_local_host = host_header in ("localhost", "127.0.0.1", "[::1]", "testclient", "testserver")
+    from urllib.parse import urlsplit
+    try:
+        host_header = (urlsplit('//' + (request.headers.get("host") or '')).hostname or '').lower()
+    except ValueError:
+        return False
+    is_local_host = host_header in ("localhost", "127.0.0.1", "::1", "testclient", "testserver")
     if not is_local_host:
         return False
 
@@ -564,7 +568,8 @@ async def websocket_endpoint(websocket: WebSocket):
     # Verify auth token before accepting the socket. A rejected handshake is
     # clearer to clients and avoids accidentally accepting the same socket twice.
     token = websocket.query_params.get("token")
-    if is_auth_required() and (not token or not verify_token(token)):
+    authorized = bool(token and verify_token(token)) or (not is_auth_required() and is_local_request(websocket))
+    if not authorized:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Unauthorized")
         return
 
