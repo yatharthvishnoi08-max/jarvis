@@ -13,6 +13,7 @@ import subprocess
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 import psutil
+from core.execution_control import cancellation_requested
 
 # Safe import of PyAutoGUI with fail-safe enabled
 try:
@@ -182,6 +183,8 @@ def _enforce_desktop_and_target(target_window: str) -> tuple[bool, str]:
     3. The active visible foreground window matches the expected target (verify_foreground_window).
     Returns (True, "OK") if verified, or (False, error_message).
     """
+    if cancellation_requested():
+        return False, "ERROR: Operation cancelled by user."
     if not target_window or not str(target_window).strip():
         return False, "ERROR: An explicit target_window is required to prevent unintended input."
 
@@ -316,28 +319,53 @@ def _prevent_corner_failsafe():
             pass
 
 def keyboard_type(target_window: str, text: str, press_enter: bool = False, interval: float = 0.02) -> str:
-    """Types the given text into the verified target window."""
+    """Type in short batches, checking Stop and foreground focus between batches."""
     valid, err = _enforce_desktop_and_target(target_window)
     if not valid:
         return err
 
     if not PYAUTOGUI_AVAILABLE:
         return "ERROR: PyAutoGUI is not available."
+    typed = 0
     try:
-        _prevent_corner_failsafe()
-        try:
-            pyautogui.typewrite(text, interval=interval)
-        except Exception:
+        interval = float(interval)
+        if not 0 <= interval <= 0.1:
+            return "ERROR: Typing interval must be between 0 and 0.1 seconds."
+        pyautogui.FAILSAFE = True
+        # PyAutoGUI silently drops Unicode. Choose paste BEFORE sending any keys;
+        # never retry a failed/partially typed operation by pasting the whole text.
+        if not text.isascii():
             import pyperclip
-            pyperclip.copy(text)
-            pyautogui.hotkey("ctrl", "v")
-
+            previous = pyperclip.paste()
+            try:
+                pyperclip.copy(text)
+                valid, err = _enforce_desktop_and_target(target_window)
+                if not valid:
+                    return err
+                pyautogui.hotkey("ctrl", "v")
+                # Give the foreground application time to consume the clipboard.
+                time.sleep(0.1)
+                typed = len(text)
+            finally:
+                pyperclip.copy(previous)
+        else:
+            batch_size = min(8, max(1, int(0.15 / max(interval, 0.001))))
+            for offset in range(0, len(text), batch_size):
+                valid, err = _enforce_desktop_and_target(target_window)
+                if not valid:
+                    return f"{err} Stopped after {typed} characters; text may be partial."
+                batch = text[offset:offset + batch_size]
+                pyautogui.typewrite(batch, interval=interval)
+                typed += len(batch)
+        valid, err = _enforce_desktop_and_target(target_window)
+        if not valid:
+            return f"{err} Sent {typed} characters; Enter was not pressed."
         if press_enter:
             pyautogui.press("enter")
             return f"SUCCESS: Typed '{text}' and pressed Enter."
         return f"SUCCESS: Typed '{text}'."
     except Exception as e:
-        return f"ERROR typing text: {str(e)}"
+        return f"ERROR typing text: {str(e)}. Input may be partial; inspect before retrying."
 
 def keyboard_hotkey(target_window: str, keys: List[str]) -> str:
     """Executes a keyboard shortcut combination in the verified target window."""
