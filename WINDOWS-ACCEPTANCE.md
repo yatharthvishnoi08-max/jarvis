@@ -1,7 +1,7 @@
 # Windows J.A.R.V.I.S. Integration Acceptance Report
 
 ## 1. Commit and Environment Details
-- **Integration Commit**: `09e8102` (tracking `origin/codex/windows-integration`)
+- **Integration Commit**: `4af4020` (tracking `origin/codex/windows-integration`)
 - **Git Branch**: `codex/windows-integration`
 - **Host OS**: Windows 11 / Windows 10 (Standard signed-in user session, non-elevated)
 - **Primary Model Provider**: Google Gemini (`gemini-3.5-flash-lite`)
@@ -19,7 +19,7 @@
 | **Emergency Stop & Cooperative Cancellation** | **PASS** | Verified live across both cancellation modes: (1) **Pre-action turn cancellation** (Session `c2a6488e`) cleanly halted before tool dispatch; (2) **Live mid-typing cooperative cancellation** (Session `6cd11571`) interrupted `keyboard_type` at character 329 of 1885, suppressed trailing Enter, returned immediately to `"Ready to talk"`, and follow-up chat succeeded. |
 | **Planner & Deduplication** | **PASS** | SQLite-backed shared planner (`tools/planner.py`). Reconciled 5 unique dated tasks across multi-document updates, verified idempotent duplicate rejection on re-add ("Already on your list as #..."), and completed test-created task IDs cleanly. |
 | **Memory Engine** | **PASS** | Bounded local keyword recall (BM25), pinned core preferences, context budget cap (5,000 chars), SQLite memory cards with optimistic versioning. End-to-end lifecycle verified via owner UI: card #13 created (v1 violet/Thursday), edited (v2 amber/Tuesday), tested in recall preview (MAVEN-482 matched, unrelated piano query excluded), and archived (fresh session returned "unknown"). Note: Verifies bounded local keyword recall and lifecycle; does not establish semantic/vector retrieval. |
-| **Voice Synthesis & Listening** | **PARTIAL** | ElevenLabs TTS audio generation and UI replay controls verified in browser; text-first resilience preserves message text if TTS fails. **Unverified**: Physical microphone audio capture, physical speaker audibility, and voice barge-in remain unverified on this host. |
+| **Voice Synthesis, Wake Word & Interruption** | **PASS (CODE/UI) / PENDING (PHYSICAL)** | Continuous voice loop (`fa1e9c3`), status strip transitions (`09e8102`), browser 'Hey Jarvis' standby toggle with 45s idle fallback (`cce85cf`), auto-open Talk from Network/Planner (`d4bda0a`), and same-tab mic lock queue/release (`4af4020`) verified in code and browser DOM. Unit/integration suites passing (125 pytest, 13 voice TAP tests). Owner personally confirmed header `wake-2026.11.21.1` and "Say Hey Jarvis" active in normal Chrome/Edge. **PENDING OWNER TRIAL (PHYSICAL)**: Physical spoken trial ("Hey Jarvis, tell me a short story" and "Hey Jarvis, stop" barge-in) pending owner live test. Not marked passed yet. |
 | **Google Workspace Connector** | **BLOCKED** | Read-only Gmail/Calendar client configured in Google Cloud project `nice-proposal-515406-b2`. **Blocked / Paused**: Requires human interactive OAuth consent on Windows host (`~/.config/jarvis/google-desktop.json`). |
 
 ---
@@ -246,3 +246,44 @@ Tested live through the deployed UI on `http://localhost:8000/` in a fresh conve
 ### C. Voice Conversation Controls & Hardware Boundary
 - **UI Controls**: Deployed composer verifies presence of the `Start voice conversation` button and state-aware status transitions (`Ready to talk`, `Working on your request`, `Speaking`).
 - **Hardware Boundary Disclaimer**: Unit tests and simulated browser loops pass (5 TAP tests in `npm run test:voice`). Physical microphone capture, physical audio audibility, and hardware voice barge-in remain separate unverified hardware items and are not claimed based on simulated tests. Physical microphone was not triggered during live testing to avoid unexpected recording while the laptop is in use.
+
+---
+
+## 9. Wake Word Standby, Interruption, and Runtime Identity Deployment (`4af4020`)
+
+### A. Integrated Commits
+- `cce85cf`: Browser "Hey Jarvis" wake-word standby, persisted auto-start toggle, interim speech interruption, echo guard, 45s idle-to-standby, microphone off button, cross-tab lock, runtime badge `wake-2026.11.21.1`, and `VOICE-QUICKSTART.md`.
+- `d4bda0a`: Auto-open Talk from Network/Planner on voice activation; persistent global header microphone status indicator and one-click off button.
+- `4af4020`: Same-tab microphone lock queue/release race fix when toggling voice; manual fallback preserves conversation mode; improved build badge contrast.
+
+### B. Automated Test Suites & Production Build Totals
+- **Pytest (Backend)**: 125 passed, 1 skipped (live hardware smoke test) in 25.75s.
+- **Node Voice Suite (`npm run test:voice --prefix frontend`)**: 13/13 TAP tests passed in 8.42s (wake phrase stripping, interim speech interruption, speaker echo guard, 45s idle-to-standby, multi-tab locks, approval blocks).
+- **Vite Production Build (`npm run build --prefix frontend`)**: Succeeded cleanly in 10.28s (`tsc && vite build`).
+  - Active frontend bundle: `web_dist/assets/index-CvpzDW0T.js` (324.28 kB).
+  - Runtime identity endpoint `/api/runtime` verified: `release="wake-2026.11.21.1"`, `hostname="LAPTOP-3JUO75R2"`, `interface="browser"`, `wake_word="Hey Jarvis"`.
+
+### C. Browser UI Verification & Owner-Confirmed State
+- **URL**: `http://localhost:8000/` (token-free URL for the owner).
+- **Loaded Page Script**: Confirmed `http://localhost:8000/assets/index-CvpzDW0T.js` loaded in browser DOM.
+- **Web Speech API**: `window.SpeechRecognition = true`, `window.webkitSpeechRecognition = true` present.
+- **Header Runtime Badge**: `wake-2026.11.21.1 · LAPTOP-3JUO75R2` with status `Microphone paused · Turn off`.
+- **Owner Confirmation in Normal Chrome/Edge**: The owner personally confirmed seeing header `wake-2026.11.21.1` and the active prompt `"Say Hey Jarvis"`.
+- **Verified UI Screenshot**: [wake_runtime_verified.png](file:///C:/Users/asha0/.gemini/antigravity/brain/10f936d3-63ca-470e-8451-1aa2cc7f0aef/wake_runtime_verified.png).
+
+### D. Verification Blockers & Physical Wake/Interruption Status
+1. **Window Focus Observation**:
+   - The owner's Google Chrome window was active in the foreground (`Activity | OpenRouter - Google Chrome`). Per user instructions and OS `SetForegroundWindow` protections, background automation ceased competing for focus.
+2. **Correction of Disk Cache Assumption**:
+   - The earlier hypothesis that the owner was viewing stale bundle `index-VJ5v9afZ.js` was an inference from disk files; vision analysis confirmed OpenRouter was the active page. That claim is corrected as unverified.
+3. **Physical Wake & Interruption Status: PENDING / UNVERIFIED**:
+   - All synthetic SAPI loopback and competing audio/focus automation have been halted to leave a clean environment for the owner's live spoken test.
+   - Physical acoustic wake word ("Hey Jarvis, tell me a short story") and playback barge-in ("Hey Jarvis, stop") remain **PENDING OWNER TRIAL** and are explicitly **NOT MARKED PASSED**.
+
+### E. Owner Localhost Test Route
+The gateway process (`server.py`) remains active on `http://127.0.0.1:8000`:
+1. Keep the normal Chrome/Edge tab open at `http://localhost:8000/`.
+2. Confirm the header badge displays `wake-2026.11.21.1 · LAPTOP-3JUO75R2` with `"Say Hey Jarvis"`.
+3. Speak: *"Hey Jarvis, tell me a short story"* to test wake-word activation and response.
+4. Speak: *"Hey Jarvis, stop"* while speech playback is active to test interruption.
+
