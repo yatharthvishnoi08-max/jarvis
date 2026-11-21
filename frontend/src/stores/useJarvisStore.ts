@@ -14,6 +14,7 @@ interface JarvisState {
   pendingApprovals: ApprovalRequest[];
   ws: WebSocket | null;
   connectionError: string | null;
+  actionError: string | null;
   reconnectAttempt: number;
   voiceEnabled: boolean;
   isEmergencyStopped: boolean;
@@ -50,6 +51,7 @@ export const useJarvisStore = create<JarvisState>((set, get) => {
     currentThought: null,
     pendingApprovals: [],
     ws: null,
+    actionError: null,
     connectionError: null,
     reconnectAttempt: 0,
     voiceEnabled: true,
@@ -399,6 +401,7 @@ export const useJarvisStore = create<JarvisState>((set, get) => {
     },
 
     decideApproval: async (requestId: string, decision: 'approve' | 'reject') => {
+      set({actionError: null});
       const token = useAuthStore.getState().token;
       try {
         const res = await fetch(`/api/approvals/${requestId}/decide`, {
@@ -409,6 +412,10 @@ export const useJarvisStore = create<JarvisState>((set, get) => {
           },
           body: JSON.stringify({ decision })
         });
+        if (!res.ok) {
+          await get().fetchPendingApprovals();
+          throw new Error('Decision was not accepted');
+        }
         if (res.ok) {
           set((state) => ({
             pendingApprovals: state.pendingApprovals.filter((r) => r.id !== requestId),
@@ -416,19 +423,21 @@ export const useJarvisStore = create<JarvisState>((set, get) => {
           }));
         }
       } catch (err) {
-        console.error(`Failed to decide approval ${requestId}:`, err);
+        set({actionError:'Your decision was not accepted. Refresh Activity and check whether the request expired.'});
       }
     },
 
     cancelSession: async () => {
+      set({actionError: null});
+      useAudioStore.getState().stopAudio();
       const token = useAuthStore.getState().token;
       const sessionId = get().currentSessionId;
       try {
-        await fetch(`/api/sessions/${sessionId}/cancel`, {
+        const response = await fetch(`/api/sessions/${sessionId}/cancel`, {
           method: 'POST',
           headers: { Authorization: `Bearer ${token}` }
         });
-        useAudioStore.getState().stopAudio();
+        if (!response.ok) throw new Error('Cancellation was not acknowledged');
         set({
           orbState: 'idle',
           currentTool: null,
@@ -436,18 +445,20 @@ export const useJarvisStore = create<JarvisState>((set, get) => {
           pendingApprovals: []
         });
       } catch (err) {
-        console.error('Failed to cancel session:', err);
+        set({actionError:'Could not confirm cancellation. The task may still be running.'});
       }
     },
 
     triggerEmergencyStop: async () => {
+      set({actionError: null, isEmergencyStopped: true});
+      useAudioStore.getState().stopAudio();
       const token = useAuthStore.getState().token;
       try {
-        await fetch('/api/emergency-stop', {
+        const response = await fetch('/api/emergency-stop', {
           method: 'POST',
           headers: { Authorization: `Bearer ${token}` }
         });
-        useAudioStore.getState().stopAudio();
+        if (!response.ok) throw new Error('Stop was not acknowledged');
         set({
           isEmergencyStopped: true,
           orbState: 'error',
@@ -456,7 +467,7 @@ export const useJarvisStore = create<JarvisState>((set, get) => {
           pendingApprovals: []
         });
       } catch (err) {
-        console.error('Failed to trigger emergency stop:', err);
+        set({actionError:'Could not confirm the stop with Windows. The task may still be running.'});
       }
     },
 
