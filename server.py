@@ -31,7 +31,7 @@ from core.session import session_manager, Session
 from core.speaker import ElevenLabsSpeaker
 from core.agent import JarvisAgent
 from core.client import ModelConfigurationError
-from tools import briefing, planner
+from tools import briefing, planner, memory_store
 from tools.meta_tools import EMPLOYEES_DIR, MEMORY_FILE, read_memory, update_employee_sop, log_learned_rule
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -431,16 +431,43 @@ async def update_team_member(name: str, req: UpdateSOPRequest, auth: bool = Depe
 
 @app.get("/api/memory")
 async def get_memory(auth: bool = Depends(authenticate_request)):
-    return {"memory": read_memory()}
+    return {"memory": memory_store.memory_text(), "records": memory_store.list_memories(include_inactive=True)}
 
 class LogMemoryRequest(BaseModel):
-    category: str
-    rule: str
+    category: str = Field(min_length=1, max_length=40)
+    rule: str = Field(min_length=1, max_length=4000)
+    expires_at: Optional[str] = None
 
 @app.post("/api/memory")
 async def add_memory_rule(req: LogMemoryRequest, auth: bool = Depends(authenticate_request)):
-    res = log_learned_rule(req.category, req.rule)
-    return {"result": res}
+    try:
+        record = memory_store.add_memory(req.category, req.rule, expires_at=req.expires_at)
+        return {"result": "Memory saved.", "record": record}
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+class ChangeMemoryRequest(BaseModel):
+    version: int = Field(ge=1)
+    action: str = "edit"
+    category: Optional[str] = None
+    rule: Optional[str] = None
+    expires_at: Optional[str] = None
+
+
+@app.put("/api/memory/{memory_id}")
+async def change_memory(memory_id: int, req: ChangeMemoryRequest, auth: bool = Depends(authenticate_request)):
+    if req.action == "edit" and (req.category is None or req.rule is None):
+        raise HTTPException(status_code=422, detail="Provide a category and memory text.")
+    try:
+        record = memory_store.change_memory(memory_id, **req.model_dump())
+        return {"record": record}
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Memory not found.")
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
 
 # Activity / Audit
 @app.get("/api/activity")
