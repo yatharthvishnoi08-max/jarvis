@@ -9,6 +9,7 @@ import re
 import time
 import json
 import base64
+import shutil
 import subprocess
 from pathlib import Path
 from typing import List, Optional, Dict, Any
@@ -88,7 +89,11 @@ COMMON_APP_MAP = {
     ],
     "edge": ["msedge"],
     "msedge": ["msedge"],
-    "notepad": ["notepad"],
+    "notepad": [
+        os.path.expandvars(r"%SystemRoot%\System32\notepad.exe"),
+        os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\WindowsApps\notepad.exe"),
+        "notepad",
+    ],
     "calc": ["calc"],
     "calculator": ["calc"],
     "explorer": ["explorer"],
@@ -460,7 +465,17 @@ def _launch_interactive_app(exe_path: str, args: str = "") -> tuple[bool, str]:
         except Exception:
             pass
 
-    # 2. Get short 8.3 path or quote path for task scheduler
+    # 2. Direct Win32 ShellExecuteW launch on the active interactive desktop
+    try:
+        import ctypes
+        working_dir = os.path.dirname(exe_path) if (os.path.isabs(exe_path) and os.path.isfile(exe_path)) else None
+        res = ctypes.windll.shell32.ShellExecuteW(None, "open", exe_path, args or None, working_dir, 1)
+        if res > 32:
+            return True, "Launched interactive process via ShellExecuteW."
+    except Exception:
+        pass
+
+    # 3. Get short 8.3 path or quote path for task scheduler
     clean_path = exe_path
     try:
         import win32api
@@ -660,6 +675,10 @@ def open_app(target: str) -> str:
         expanded = os.path.expandvars(target)
         if os.path.exists(expanded):
             resolved_path = expanded
+        else:
+            which = shutil.which(target)
+            if which and os.path.isabs(which) and os.path.exists(which):
+                resolved_path = which
 
     # 3. Launch via interactive spawner if path resolved
     if resolved_path and os.path.isabs(resolved_path):
