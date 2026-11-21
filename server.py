@@ -785,7 +785,13 @@ async def websocket_endpoint(websocket: WebSocket):
 async def serve_pwa(full_path: str):
     # Check if built React PWA exists in web_dist
     if WEB_DIST_DIR.exists():
-        target_file = WEB_DIST_DIR / full_path
+        try:
+            root = WEB_DIST_DIR.resolve()
+            target_file = (root / full_path).resolve()
+            if not target_file.is_relative_to(root):
+                raise HTTPException(status_code=403, detail="Invalid asset path.")
+        except (OSError, RuntimeError):
+            raise HTTPException(status_code=403, detail="Invalid asset path.")
         if full_path and target_file.is_file():
             return FileResponse(target_file)
         index_file = WEB_DIST_DIR / "index.html"
