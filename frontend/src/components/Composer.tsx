@@ -2,18 +2,11 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useJarvisStore } from '../stores/useJarvisStore';
 import { Send, Mic, MicOff, Square, WifiOff, RotateCw } from 'lucide-react';
 
-export const Composer: React.FC = () => {
-  const [text, setText] = useState('');
+export const Composer: React.FC<{text:string;setText:(value:string)=>void}> = ({text,setText}) => {
+  const { sendMessage, orbState, cancelSession, isListening, setIsListening, ws, pendingApprovals } = useJarvisStore();
+  const online = ws?.readyState === WebSocket.OPEN;
   const [micHint, setMicHint] = useState('');
-  const {
-    sendMessage,
-    orbState,
-    cancelSession,
-    isListening,
-    setIsListening,
-    connectionError,
-    retryConnection
-  } = useJarvisStore();
+  const { connectionError, retryConnection } = useJarvisStore();
   const recognitionRef = useRef<any>(null);
 
   useEffect(() => {
@@ -82,10 +75,10 @@ export const Composer: React.FC = () => {
   };
 
   const isBusy = orbState === 'thinking' || orbState === 'acting';
-  const isConnected = orbState !== 'disconnected' && orbState !== 'error';
+  const isConnected = online && orbState !== 'disconnected' && (orbState !== 'error' || pendingApprovals.length > 0);
 
   return (
-    <div className="p-3 sm:p-4 bg-obsidian-900/90 border-t border-slate-800/80 backdrop-blur-md">
+    <div className="jarvis-composer">
       {!isConnected && (
         <div className="max-w-3xl mx-auto mb-3 flex items-center justify-between gap-3 rounded-xl border border-amber-500/30 bg-amber-950/30 px-3 py-2.5 text-xs text-amber-100">
           <div className="flex items-center gap-2 min-w-0">
@@ -100,6 +93,7 @@ export const Composer: React.FC = () => {
             <RotateCw className="w-3.5 h-3.5" />
             Retry
           </button>
+          <a href="?view=basic">Open basic chat</a>
         </div>
       )}
       <form onSubmit={handleSubmit} className="max-w-3xl mx-auto flex items-center space-x-2">
@@ -107,7 +101,7 @@ export const Composer: React.FC = () => {
         <button
           type="button"
           onClick={toggleMic}
-          disabled={!isConnected || isBusy}
+          disabled={!isConnected || isBusy || pendingApprovals.length > 0}
           className={`p-3 rounded-full border transition flex items-center justify-center shrink-0 shadow-lg ${
             isListening
               ? 'bg-red-950 border-red-500 text-red-400 animate-pulse'
@@ -122,15 +116,13 @@ export const Composer: React.FC = () => {
         <div className="flex-1 relative">
           <input
             type="text"
+            aria-label="Message Jarvis"
             value={text}
             onChange={(e) => setText(e.target.value)}
-            disabled={!isConnected}
             placeholder={
               isListening
                 ? 'Listening to your voice... Speak now.'
-                : !isConnected
-                  ? 'Waiting for the realtime connection…'
-                  : 'Message JARVIS, run a system tool, or coach an employee...'
+                : 'Type to Jarvis while you talk…'
             }
             className="w-full bg-obsidian-850/90 border border-slate-800 rounded-full px-4 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500/70 transition"
           />
@@ -149,7 +141,7 @@ export const Composer: React.FC = () => {
         ) : (
           <button
             type="submit"
-            disabled={!text.trim() || !isConnected}
+            disabled={!isConnected || !text.trim() || pendingApprovals.length > 0}
             className="p-2.5 rounded-full bg-jarvis-cyan text-obsidian-950 hover:bg-cyan-400 disabled:opacity-30 disabled:pointer-events-none active:scale-95 transition flex items-center justify-center shrink-0 font-bold"
             title="Send"
           >

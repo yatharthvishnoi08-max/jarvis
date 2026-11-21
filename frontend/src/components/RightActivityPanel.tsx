@@ -28,13 +28,13 @@ export const RightActivityPanel: React.FC<RightActivityPanelProps> = ({
       {isOpen && (
         <div
           onClick={onClose}
-          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 xl:hidden"
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 "
         />
       )}
 
       <aside
-        className={`fixed xl:static top-0 right-0 h-full w-80 bg-obsidian-900 border-l border-slate-800/80 flex flex-col z-50 transition-transform duration-300 ease-in-out ${
-          isOpen ? 'translate-x-0' : 'translate-x-full xl:translate-x-0'
+        className={`fixed top-0 right-0 h-full w-80 bg-obsidian-900 border-l border-slate-800/80 flex flex-col z-50 transition-transform duration-300 ease-in-out ${
+          isOpen ? 'translate-x-0' : 'translate-x-full '
         }`}
       >
         {/* Panel Header */}
@@ -45,7 +45,7 @@ export const RightActivityPanel: React.FC<RightActivityPanelProps> = ({
               Activity & Approvals
             </span>
           </div>
-          <button onClick={onClose} className="p-1 text-slate-400 hover:text-white xl:hidden">
+          <button onClick={onClose} aria-label="Close activity" className="p-1 text-slate-400 hover:text-white ">
             <X className="w-5 h-5" />
           </button>
         </div>

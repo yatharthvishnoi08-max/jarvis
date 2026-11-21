@@ -20,7 +20,8 @@ from fastapi import (
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from openai import APIStatusError, APITimeoutError
 
 from core.auth import verify_token, redact_secrets, global_rate_limiter, OWNER_TOKEN, is_auth_required
 from core.audit import audit_logger
@@ -28,6 +29,8 @@ from core.approvals import approval_manager
 from core.session import session_manager, Session
 from core.speaker import ElevenLabsSpeaker
 from core.agent import JarvisAgent
+from core.client import ModelConfigurationError
+from tools import planner
 from tools.meta_tools import EMPLOYEES_DIR, MEMORY_FILE, read_memory, update_employee_sop, log_learned_rule
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -133,6 +136,68 @@ async def verify_auth(auth: bool = Depends(authenticate_request)):
 class LoginRequest(BaseModel):
     token: str
 
+
+class ConversationTurn(BaseModel):
+    session_id: str = Field(min_length=1, max_length=100)
+    text: str = Field(min_length=1, max_length=16000)
+
+
+@app.post("/api/chat")
+async def basic_chat(turn: ConversationTurn, auth: bool = Depends(authenticate_request)):
+    text = turn.text.strip()
+    if not text or not session_manager.valid_id(turn.session_id):
+        raise HTTPException(422, "Enter a message and a valid conversation ID.")
+    session = session_manager.get_or_create_session(turn.session_id)
+    async with session.turn_lock:
+        history = [{"role": m["role"], "content": m["content"]} for m in session.messages
+                   if m["role"] in ("user", "assistant") and m.get("content") and not m.get("tool_calls")]
+        prompt = [{"role": "system", "content": "You are Jarvis, a thoughtful personal assistant. Answer directly. You are in conversation mode. For actions on a device, direct the owner to the agent workspace."},
+                  *history[-40:], {"role": "user", "content": text}]
+        try:
+            client = agent.client.with_options(timeout=90, max_retries=0)
+            result = await asyncio.wait_for(asyncio.to_thread(
+                client.chat.completions.create, model=agent.model_name, messages=prompt
+            ), timeout=95)
+            answer = (result.choices[0].message.content or "").strip()
+        except ModelConfigurationError:
+            raise HTTPException(503, "The gateway needs a model API key. Configure OPENROUTER_API_KEY on the host and restart Jarvis.")
+        except (asyncio.TimeoutError, APITimeoutError):
+            raise HTTPException(504, "The model took too long. Please try again.")
+        except APIStatusError as exc:
+            hints = {401: "Check the model API key.", 403: "Check access to the configured model.",
+                     404: "Check the configured model name.", 402: "Check the provider balance.",
+                     429: "The model is busy. Try again shortly."}
+            raise HTTPException(502, hints.get(exc.status_code, "The model provider rejected the request."))
+        except Exception:
+            raise HTTPException(502, "Could not get a reply from the configured model. Check the gateway's model connection.")
+        if not answer:
+            raise HTTPException(502, "The model returned an empty reply. Please try again.")
+        user = session.add_message("user", text)
+        reply = session.add_message("assistant", answer)
+        return {"user": user, "reply": reply}
+
+
+@app.post("/api/sessions/{session_id}/replies/{message_id}/speech")
+async def speak_reply(session_id: str, message_id: str, auth: bool = Depends(authenticate_request)):
+    session = session_manager.get_session(session_id)
+    reply = next((m for m in session.messages if m["id"] == message_id and m["role"] == "assistant"), None) if session else None
+    if not reply:
+        raise HTTPException(404, "Reply not found.")
+    path = speaker.get_audio_path(reply["audio_id"]) if reply.get("audio_id") else None
+    if not path or not path.is_file():
+        if not speaker.api_key:
+            raise HTTPException(503, "ElevenLabs voice is not configured on this gateway.")
+        meta = await asyncio.to_thread(speaker.generate_speech, reply["content"], session_id, message_id)
+        if not meta:
+            raise HTTPException(502, "ElevenLabs could not generate this reply.")
+        reply["audio_id"] = meta["audio_id"]
+        if session_manager.get_session(session_id) is session:
+            session.save()
+        path = speaker.get_audio_path(meta["audio_id"])
+    if not path or not path.is_file():
+        raise HTTPException(502, "The generated audio could not be loaded.")
+    return FileResponse(path, media_type="audio/mpeg", headers={"Cache-Control": "no-store"})
+
 @app.post("/api/auth/login")
 async def login(req: LoginRequest):
     if verify_token(req.token):
@@ -163,6 +228,30 @@ async def get_telemetry(auth: bool = Depends(authenticate_request)):
         "active_model": agent.model_name,
         "voice_configured": bool(speaker.api_key)
     }
+
+# Owner planner. Chat tools and the dashboard share one store.
+class PlannerItem(BaseModel):
+    title: str
+    due: Optional[str] = None
+
+
+@app.get("/api/planner")
+def read_planner(auth: bool = Depends(authenticate_request)):
+    return {"tasks": planner.open_tasks()}
+
+
+@app.post("/api/planner")
+def create_planner_item(item: PlannerItem, auth: bool = Depends(authenticate_request)):
+    try:
+        return {"message": planner.add_task(item.title, item.due)}
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/api/planner/{task_id}/complete")
+def finish_planner_item(task_id: int, auth: bool = Depends(authenticate_request)):
+    return {"message": planner.complete_task(task_id)}
+
 
 # Sessions
 @app.get("/api/sessions")

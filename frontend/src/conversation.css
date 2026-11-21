@@ -1,0 +1,36 @@
+.jarvis-shell { height:100vh; height:100dvh; background:#0b111b; color:#f0f4fa; font-family:Inter,system-ui,sans-serif; }
+.jarvis-bar { display:flex; align-items:center; gap:1rem; padding:.8rem clamp(.75rem,4vw,4rem); border-bottom:1px solid #253040; }
+.jarvis-brand { display:flex; align-items:center; gap:.55rem; font-size:1.35rem; font-weight:650; letter-spacing:-.055em; }
+.jarvis-brand svg { color:#97dccf; }
+.link-state { display:flex; align-items:center; gap:.4rem; color:#bbc5cf; font-size:.76rem; }
+.link-state::before { content:''; width:.44rem; height:.44rem; border-radius:50%; background:#cca56c; }
+.link-state[data-online=true]::before { background:#93ddbc; }
+.jarvis-bar nav { display:flex; align-items:center; gap:.3rem; margin-left:auto; }
+.jarvis-bar nav button { display:flex; align-items:center; gap:.4rem; padding:.5rem .65rem; min-height:40px; border-radius:.6rem; color:#c2ccd7; font-size:.83rem; }
+.jarvis-bar nav button:hover { background:#1a2634; }
+.jarvis-bar nav svg { width:17px; height:17px; }
+.jarvis-shell aside { position:fixed; }
+.jarvis-shell aside button[class*="lg:hidden"],.jarvis-shell aside button[class*="xl:hidden"] { display:block; }
+.jarvis-shell div.fixed[class*="bg-black/60"] { display:block; }
+.jarvis-shell main { background:radial-gradient(ellipse at 50% 35%,#172832 0%,#101b26 38%,#0b111b 76%); }
+.jarvis-feed { padding:clamp(1rem,3vw,2.5rem); overscroll-behavior:contain; }
+.jarvis-start { display:flex; min-height:100%; flex-direction:column; justify-content:center; align-items:center; text-align:center; padding:1rem 0; }
+.jarvis-start h1 { margin:1.6rem 0 .5rem; font:500 clamp(2rem,5vw,3.8rem)/1.08 Inter,system-ui,sans-serif; letter-spacing:-.065em; }
+.jarvis-start p { color:#acb9c4; font-size:1rem; }
+.signal-field { display:grid; place-items:center; width:clamp(7rem,18vh,11rem); aspect-ratio:1; }
+.signal-core { position:relative; border-radius:50%; width:92%; height:92%; background:radial-gradient(circle at 34% 28%,#a7f3d846,#4e93951a 55%,#749ec13a); box-shadow:0 0 65px #75d0d51c,inset 0 0 22px #a0eddf35; }
+.signal-core i { position:absolute; inset:0; border-radius:50%; border:1px solid #9be6dbb0; }
+.jarvis-shortcuts { display:flex; justify-content:center; flex-wrap:wrap; gap:.55rem; margin-top:1.8rem; }
+.jarvis-shortcuts button { display:flex; gap:.55rem; align-items:center; border:1px solid #354651; border-radius:2rem; padding:.66rem .85rem; background:#17242d; color:#d3e3e4; font-size:.82rem; }
+.jarvis-shortcuts button:hover:enabled { background:#243a40; }
+.jarvis-shortcuts button:disabled { opacity:.5; }
+.jarvis-composer { padding:.75rem 1rem max(1.3rem,env(safe-area-inset-bottom)); }
+.jarvis-composer form { border-radius:1.25rem; padding:.55rem; border:1px solid #394954; background:#192531; box-shadow:0 4px 32px #0002; }
+.jarvis-composer form:focus-within { border-color:#87cbbd; }
+.jarvis-composer input { border:0; background:transparent; font-size:1rem; }
+.jarvis-composer button[type=submit] { background:#a9e6cf; color:#173b34; }
+.jarvis-composer p,.turn-status { max-width:48rem; margin:0 auto .65rem; color:#e6cda9; font-size:.85rem; }
+.jarvis-feed:has(.jarvis-start) > div:last-child { display:none; }
+.jarvis-shell button:focus-visible { outline:2px solid #a9e6cf; outline-offset:2px; }
+@media(max-width:650px) { .jarvis-bar { gap:.65rem; } .jarvis-bar nav button { padding:.3rem; min-width:30px; justify-content:center; } .jarvis-bar nav button span { display:none; } .jarvis-shortcuts { gap:.4rem; } .jarvis-shortcuts button { padding:.55rem .75rem; } .jarvis-shortcuts button svg:last-child { display:none; } .jarvis-start { gap:.1rem; } }
+@media(max-height:560px) { .signal-field { width:4.5rem; } .jarvis-start h1,.jarvis-shortcuts { margin-top:.6rem; } }

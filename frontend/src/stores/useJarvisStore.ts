@@ -366,7 +366,7 @@ export const useJarvisStore = create<JarvisState>((set, get) => {
     sendMessage: (text: string) => {
       const socket = get().ws;
       const sessionId = get().currentSessionId;
-      if (!sessionId || !socket || socket.readyState !== WebSocket.OPEN ||
+      if (!sessionId || !socket || socket.readyState !== WebSocket.OPEN || get().pendingApprovals.length ||
           ['acting', 'thinking', 'error', 'disconnected'].includes(get().orbState)) {
         return false;
       }
@@ -378,12 +378,8 @@ export const useJarvisStore = create<JarvisState>((set, get) => {
         content: text,
         timestamp: Math.floor(Date.now() / 1000)
       };
-      set((state) => ({
-        messages: [...state.messages, userMsg],
-        orbState: 'thinking'
-      }));
-
-      socket.send(
+      try {
+        socket.send(
         JSON.stringify({
           type: 'chat',
           session_id: sessionId,
@@ -392,6 +388,13 @@ export const useJarvisStore = create<JarvisState>((set, get) => {
           voice: get().voiceEnabled
         })
       );
+      } catch {
+        return false;
+      }
+      set((state) => ({
+        messages: [...state.messages, userMsg],
+        orbState: 'thinking'
+      }));
       return true;
     },
 

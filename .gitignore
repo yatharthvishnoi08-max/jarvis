@@ -42,3 +42,6 @@ certs/
 *.csr
 *.srl
 
+# Persistent SQLite Planner
+memory/planner.sqlite3*
+

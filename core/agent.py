@@ -2,10 +2,12 @@ import json
 import time
 import uuid
 import asyncio
+from datetime import date
 from pathlib import Path
 from typing import Optional, Callable, Dict, Any, List
 
-from core.client import get_client
+from functools import cached_property
+from core.client import get_client, model_name
 from core.auth import redact_secrets
 from core.audit import audit_logger
 from core.approvals import (
@@ -17,6 +19,7 @@ from core.approvals import (
     POLICY_BLOCKED,
 )
 from core.session import Session, session_manager
+from tools.planner import add_task, complete_task, list_tasks
 from tools.system_tools import (
     execute_powershell,
     read_file,
@@ -97,6 +100,10 @@ def _inspect_skill(skill_name: str) -> str:
     return f"# Skill: {skill.name}\n\n{skill.content}"
 
 TOOL_FUNCTIONS = {
+    # Planner
+    "add_task": add_task,
+    "list_tasks": list_tasks,
+    "complete_task": complete_task,
     # System & Meta
     "execute_powershell": execute_powershell,
     "read_file": read_file,
@@ -156,6 +163,28 @@ TOOL_FUNCTIONS = {
 }
 
 TOOL_SCHEMAS = [
+    {"type": "function", "function": {
+        "name": "add_task",
+        "description": "Save a requested personal commitment across conversations. This records a task without scheduling a notification.",
+        "parameters": {"type": "object", "properties": {
+            "title": {"type": "string", "description": "The user's task."},
+            "due": {"type": "string", "description": "today, tomorrow, or YYYY-MM-DD. Omit if unspecified."}
+        }, "required": ["title"]}
+    }},
+    {"type": "function", "function": {
+        "name": "list_tasks",
+        "description": "Read the owner's planner. Today includes overdue tasks. All includes undated and future open tasks.",
+        "parameters": {"type": "object", "properties": {
+            "view": {"type": "string", "enum": ["today", "all"]}
+        }}
+    }},
+    {"type": "function", "function": {
+        "name": "complete_task",
+        "description": "Mark the user's chosen task done. Resolve the ID with list_tasks and clarify ambiguous matches.",
+        "parameters": {"type": "object", "properties": {
+            "task_id": {"type": "integer", "description": "Planner task ID."}
+        }, "required": ["task_id"]}
+    }},
     # 1. execute_powershell
     {
         "type": "function",
@@ -846,7 +875,12 @@ TOOL_SCHEMAS = [
 
 class JarvisAgent:
     def __init__(self):
-        self.client, self.model_name = get_client()
+        self.model_name = model_name()
+
+    @cached_property
+    def client(self):
+        client, _ = get_client()
+        return client
 
     def build_system_prompt(self) -> str:
         prompt_file = BASE_DIR / "SOUL.md"
@@ -860,6 +894,8 @@ class JarvisAgent:
 
         return (
             f"{base_prompt}\n\n"
+            f"Local planner date: {date.today().isoformat()}. Use planner tools for commitments, "
+            "including daily briefings. Only claim a task change after its tool succeeds.\n\n"
             f"## Available Expert Skills Catalog:\n{skills_info}\n\n"
             f"## Current Team Roster:\n{employees_info}\n\n"
             f"## Persistent System Memory:\n{memory_info}\n"

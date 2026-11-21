@@ -12,7 +12,8 @@ interface AuthState {
 
 const getInitialToken = () => {
   if (typeof window !== 'undefined') {
-    const urlParam = new URLSearchParams(window.location.search).get('token');
+    const urlParam = new URLSearchParams(window.location.hash.slice(1)).get('token')
+      || new URLSearchParams(window.location.search).get('token');
     if (urlParam) {
       localStorage.setItem('jarvis_auth_token', urlParam.trim());
       window.history.replaceState({}, document.title, window.location.pathname);

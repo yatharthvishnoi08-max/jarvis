@@ -13,9 +13,9 @@ from tools.computer_use_tools import (
     open_app,
 )
 
-def test_total_tools_count_47():
-    assert len(TOOL_SCHEMAS) == 47, f"Expected 47 tool schemas, got {len(TOOL_SCHEMAS)}"
-    assert len(TOOL_FUNCTIONS) == 47, f"Expected 47 tool functions, got {len(TOOL_FUNCTIONS)}"
+def test_total_tools_count_50():
+    assert len(TOOL_SCHEMAS) == 50, f"Expected 50 tool schemas, got {len(TOOL_SCHEMAS)}"
+    assert len(TOOL_FUNCTIONS) == 50, f"Expected 50 tool functions, got {len(TOOL_FUNCTIONS)}"
 
 def test_computer_use_schemas_registered():
     schema_names = [s["function"]["name"] for s in TOOL_SCHEMAS]

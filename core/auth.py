@@ -54,8 +54,8 @@ def redact_secrets(text: str) -> str:
     return text
 
 def is_auth_required() -> bool:
-    """Returns False if authentication is disabled (local/personal mode)."""
-    val = os.getenv("REQUIRE_AUTH", "false").strip().lower()
+    """Returns False if authentication is explicitly disabled (local/personal mode)."""
+    val = os.getenv("REQUIRE_AUTH", "true").strip().lower()
     return val in ("true", "1", "yes", "on")
 
 def verify_token(provided_token: Optional[str]) -> bool:

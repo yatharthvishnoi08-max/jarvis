@@ -16,6 +16,15 @@ logger = logging.getLogger("JARVIS.Brain")
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
 
+
+class ModelConfigurationError(ValueError):
+    pass
+
+
+def model_name() -> str:
+    return os.getenv("MODEL_NAME", "gemini-flash-latest").strip()
+
+
 GEMINI_DEFAULT_FALLBACKS = [
     "gemini-3.5-flash-lite",
     "gemini-flash-latest",
@@ -27,6 +36,7 @@ OPENROUTER_DEFAULT_FALLBACKS = [
     "meta-llama/llama-3.3-70b-instruct",
     "nousresearch/hermes-3-llama-3.1-70b",
 ]
+
 
 class SmartChatCompletions:
     """Wrapper around chat completions that handles transparent multi-model and multi-provider failover."""
@@ -50,17 +60,17 @@ class SmartChatCompletions:
 
         last_error = None
         # 1. Try primary models
-        for model_name in models_to_try:
+        for model_name_item in models_to_try:
             try:
                 call_kwargs = dict(kwargs)
-                call_kwargs["model"] = model_name
+                call_kwargs["model"] = model_name_item
                 return self._primary_client.chat.completions.create(*args, **call_kwargs)
             except Exception as e:
                 err_str = str(e)
                 # Catch 503 (demand spike), 404 (model unavailable), 429 (free tier quota limit)
                 if any(code in err_str for code in ["503", "404", "429", "RESOURCE_EXHAUSTED", "UNAVAILABLE"]):
                     logger.warning(
-                        f"[Brain Failover]: Model '{model_name}' rate-limited or busy: {err_str[:60]}... Trying candidate."
+                        f"[Brain Failover]: Model '{model_name_item}' rate-limited or busy: {err_str[:60]}... Trying candidate."
                     )
                     last_error = e
                     continue
@@ -99,6 +109,7 @@ class SmartChatCompletions:
         if last_error:
             raise last_error
 
+
 class SmartChat:
     def __init__(
         self,
@@ -116,6 +127,7 @@ class SmartChat:
             backup_model
         )
 
+
 class SmartLLMClient:
     """Transparent proxy for OpenAI client with multi-provider failover."""
     def __init__(
@@ -127,6 +139,7 @@ class SmartLLMClient:
         backup_model: Optional[str] = None
     ):
         self._primary_client = primary_client
+        self._backup_client = backup_client
         self.chat = SmartChat(
             primary_client,
             default_model,
@@ -138,8 +151,28 @@ class SmartLLMClient:
         self.fallback_models = fallback_models
         self.backup_model = backup_model
 
+    def with_options(self, **kwargs) -> Any:
+        try:
+            new_primary = self._primary_client.with_options(**kwargs)
+        except Exception:
+            new_primary = self._primary_client
+        new_backup = None
+        if self._backup_client:
+            try:
+                new_backup = self._backup_client.with_options(**kwargs)
+            except Exception:
+                new_backup = self._backup_client
+        return SmartLLMClient(
+            new_primary,
+            default_model=self.default_model,
+            fallback_models=self.fallback_models,
+            backup_client=new_backup,
+            backup_model=self.backup_model
+        )
+
     def __getattr__(self, name: str) -> Any:
         return getattr(self._primary_client, name)
+
 
 def get_active_provider() -> str:
     """Returns 'gemini', 'openrouter', or 'custom'."""
@@ -151,6 +184,7 @@ def get_active_provider() -> str:
     if os.getenv("OPENROUTER_API_KEY", "").strip():
         return "openrouter"
     return "custom"
+
 
 def get_client() -> Tuple[SmartLLMClient, str]:
     """
@@ -164,14 +198,14 @@ def get_client() -> Tuple[SmartLLMClient, str]:
 
     if provider == "gemini":
         if not gemini_key:
-            raise ValueError(
+            raise ModelConfigurationError(
                 "\n[!] MISSING GEMINI API KEY:\n"
                 f"Please open '{BASE_DIR / '.env'}' and set GEMINI_API_KEY."
             )
 
         base_url = os.getenv("API_BASE_URL", "").strip() or "https://generativelanguage.googleapis.com/v1beta/openai/"
-        model_name = os.getenv("MODEL_NAME", "").strip() or "gemini-flash-latest"
-        fallback_models = [m for m in GEMINI_DEFAULT_FALLBACKS if m != model_name]
+        model_name_val = os.getenv("MODEL_NAME", "").strip() or "gemini-flash-latest"
+        fallback_models = [m for m in GEMINI_DEFAULT_FALLBACKS if m != model_name_val]
 
         primary_client = OpenAI(api_key=gemini_key, base_url=base_url, timeout=20.0)
 
@@ -191,23 +225,23 @@ def get_client() -> Tuple[SmartLLMClient, str]:
 
         client = SmartLLMClient(
             primary_client,
-            default_model=model_name,
+            default_model=model_name_val,
             fallback_models=fallback_models,
             backup_client=backup_client,
             backup_model=backup_model
         )
-        return client, model_name
+        return client, model_name_val
 
     elif provider == "openrouter":
         if not openrouter_key:
-            raise ValueError(
+            raise ModelConfigurationError(
                 "\n[!] MISSING OPENROUTER API KEY:\n"
                 f"Please open '{BASE_DIR / '.env'}' and set OPENROUTER_API_KEY."
             )
 
         base_url = os.getenv("API_BASE_URL", "").strip() or "https://openrouter.ai/api/v1"
-        model_name = os.getenv("MODEL_NAME", "").strip() or "meta-llama/llama-3.3-70b-instruct"
-        fallback_models = [m for m in OPENROUTER_DEFAULT_FALLBACKS if m != model_name]
+        model_name_val = os.getenv("MODEL_NAME", "").strip() or "meta-llama/llama-3.3-70b-instruct"
+        fallback_models = [m for m in OPENROUTER_DEFAULT_FALLBACKS if m != model_name_val]
 
         primary_client = OpenAI(
             api_key=openrouter_key,
@@ -217,14 +251,14 @@ def get_client() -> Tuple[SmartLLMClient, str]:
                 "X-Title": "Personal-JARVIS"
             }
         )
-        client = SmartLLMClient(primary_client, default_model=model_name, fallback_models=fallback_models)
-        return client, model_name
+        client = SmartLLMClient(primary_client, default_model=model_name_val, fallback_models=fallback_models)
+        return client, model_name_val
 
     else:
         # Custom or Ollama
         api_key = openrouter_key or gemini_key or "dummy-key"
         base_url = os.getenv("API_BASE_URL", "http://localhost:11434/v1")
-        model_name = os.getenv("MODEL_NAME", "llama3")
+        model_name_val = os.getenv("MODEL_NAME", "llama3")
         raw_client = OpenAI(api_key=api_key, base_url=base_url)
-        client = SmartLLMClient(raw_client, default_model=model_name, fallback_models=[])
-        return client, model_name
+        client = SmartLLMClient(raw_client, default_model=model_name_val, fallback_models=[])
+        return client, model_name_val

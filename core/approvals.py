@@ -63,7 +63,8 @@ def classify_tool_call(tool_name: str, args: Dict[str, Any]) -> Tuple[str, str]:
         "get_battery_status", "get_clipboard", "set_clipboard", "control_media", "find_files",
         "mouse_click", "mouse_move", "mouse_scroll", "mouse_drag", "get_mouse_position",
         "keyboard_type", "keyboard_press", "keyboard_hotkey", "open_windows_settings",
-        "open_app", "focus_window", "click_screen_element", "configure_laptop_permissions"
+        "open_app", "focus_window", "click_screen_element", "configure_laptop_permissions",
+        "list_tasks"
     ]
     if tool_name in read_tools:
         return POLICY_READ, f"Direct execution / inspection via '{tool_name}'."
