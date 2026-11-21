@@ -37,6 +37,7 @@ interface JarvisState {
   sendMessage: (text: string) => boolean;
   decideApproval: (requestId: string, decision: 'approve' | 'reject') => Promise<void>;
   cancelSession: () => Promise<void>;
+  interruptSpeech: () => void;
   triggerEmergencyStop: () => Promise<void>;
   fetchPendingApprovals: () => Promise<void>;
 }
@@ -66,13 +67,12 @@ export const useJarvisStore = create<JarvisState>((set, get) => {
 
     setOrbState: (state: OrbState) => set({ orbState: state }),
     setVoiceEnabled: (enabled: boolean) => set({ voiceEnabled: enabled }),
-    setIsListening: (listening: boolean) => {
-      set({ isListening: listening });
-      if (listening) {
-        set({ orbState: 'listening' });
-      } else if (get().orbState === 'listening') {
-        set({ orbState: 'idle' });
-      }
+    setIsListening: (listening: boolean) => { if (get().isListening !== listening) set({isListening: listening}); },
+    interruptSpeech: () => {
+      // Clear the expected reply before stopping: a late TTS result must not restart it.
+      set({pendingAudioMessageId: null});
+      useAudioStore.getState().stopAudio();
+      if (get().orbState === 'speaking') set({orbState: 'idle'});
     },
 
     connectWebSocket: () => {

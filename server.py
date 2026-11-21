@@ -277,6 +277,11 @@ async def login(req: LoginRequest):
         return {"status": "authenticated", "token": req.token}
     raise HTTPException(status_code=401, detail="Invalid owner authentication token.")
 
+@app.get("/api/runtime")
+async def get_runtime(auth: bool = Depends(authenticate_request)):
+    return {"release": "wake-2026.11.21.1", "hostname": socket.gethostname(),
+            "interface": "browser", "wake_word": "Hey Jarvis"}
+
 @app.get("/api/system/telemetry")
 async def get_telemetry(auth: bool = Depends(authenticate_request)):
     ips = get_lan_and_tailscale_ips()
@@ -811,11 +816,11 @@ async def serve_pwa(full_path: str):
             return FileResponse(target_file)
         index_file = WEB_DIST_DIR / "index.html"
         if index_file.exists():
-            return FileResponse(index_file)
+            return FileResponse(index_file, headers={"Cache-Control": "no-store"})
 
     # Fallback to legacy single-page index.html if web_dist is not built yet
     if LEGACY_HTML.exists():
-        return FileResponse(LEGACY_HTML)
+        return FileResponse(LEGACY_HTML, headers={"Cache-Control": "no-store"})
 
     return HTMLResponse("<h1>JARVIS Gateway Online</h1>", status_code=200)
 

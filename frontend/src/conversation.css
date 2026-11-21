@@ -40,3 +40,5 @@
 .voice-dot { width:7px; height:7px; background:#94808c; border-radius:50%; }
 .voice-dot.listening { background:#efb3c5; box-shadow:0 0 10px #efb3c577; }
 .voice-live-transcript { max-width:48rem; margin:.5rem auto 0; font-size:.875rem; color:#c3b5bf; overflow-wrap:anywhere; }
+
+.runtime-badge{margin-left:auto;display:flex;flex-direction:column;text-align:right;font:11px monospace;color:#8faaa8;max-width:65%;overflow-wrap:anywhere}.runtime-badge strong{color:#f4bc80;font-size:11px}.voice-conversation-status{flex-wrap:wrap}.voice-conversation-status small{font-size:10px;opacity:.7}

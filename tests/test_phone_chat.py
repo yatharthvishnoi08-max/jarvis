@@ -56,3 +56,14 @@ def test_phone_chat_restores_context_and_playback(tmp_path, monkeypatch):
             ws.send_json({**turn, "session_id": fresh, "text": "pear", "voice": False})
             assert ws.receive_json()["text"] == "pear"
         assert histories == [["mango"], ["mango", "What word?"], ["pear"]]
+
+
+def test_runtime_identifies_voice_build_without_credentials(monkeypatch):
+    import server
+    monkeypatch.setenv('JARVIS_AUTH_REQUIRED', 'true')
+    with TestClient(server.app) as app:
+        response = app.get('/api/runtime', headers={'Authorization': 'Bearer ' + server.OWNER_TOKEN})
+        assert response.status_code == 200
+        assert response.json()['release'] == 'wake-2026.11.21.1'
+        assert set(response.json()) == {'release', 'hostname', 'interface', 'wake_word'}
+        assert app.get('/').headers['cache-control'] == 'no-store'

@@ -1,0 +1,43 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {createRequire} from 'node:module';
+const require=createRequire(import.meta.url);
+global.localStorage={getItem:()=>null,setItem:()=>{},removeItem:()=>{}};
+global.window={location:{protocol:'http:',host:'fixture',search:'',hash:''}};
+let played=0, lastSocket, rejectPlay;
+global.Audio=class {currentTime=0;src='';play(){played++;this.onplay?.();return new Promise((resolve,reject)=>{rejectPlay=reject;});}pause(){}};
+global.WebSocket=class {static OPEN=1;static CONNECTING=0;readyState=1;constructor(){lastSocket=this;}send(){}close(){}};
+global.fetch=async()=>({ok:true,json:async()=>({sessions:[]})});
+const {useAuthStore}=require(process.env.VOICE_STORE_DIR+'/useAuthStore.js');
+const {useJarvisStore}=require(process.env.VOICE_STORE_DIR+'/useJarvisStore.js');
+const {useAudioStore}=require(process.env.VOICE_STORE_DIR+'/useAudioStore.js');
+useAuthStore.setState({token:'fixture'});
+useJarvisStore.getState().connectWebSocket();
+useJarvisStore.setState({currentSessionId:'fixture',orbState:'idle'});
+const event=data=>lastSocket.onmessage({data:JSON.stringify({session_id:'fixture',...data})});
+test('interrupted and superseded TTS results cannot restart playback; current reply still plays',()=>{
+ event({type:'response',message_id:'old',text:'Old reply',voice_pending:true});
+ assert.equal(useAudioStore.getState().playbackState,'generating');
+ useJarvisStore.getState().interruptSpeech();
+ event({type:'reply_audio',message_id:'old',audio_id:'old-audio',audio_url:'/old'});
+ assert.equal(played,0);assert.equal(useJarvisStore.getState().messages[0].audio_id,'old-audio');
+ event({type:'response',message_id:'new',text:'New reply',voice_pending:true});
+ event({type:'reply_audio',message_id:'old',audio_id:'old-audio',audio_url:'/old'});
+ assert.equal(played,0);assert.equal(useJarvisStore.getState().pendingAudioMessageId,'new');
+ event({type:'reply_audio',message_id:'new',audio_id:'new-audio',audio_url:'/new'});
+ assert.equal(played,1);assert.equal(useAudioStore.getState().playbackState,'speaking');
+ useJarvisStore.getState().interruptSpeech();assert.equal(useAudioStore.getState().activeAudioId,null);
+});
+test('rejected old play promise and late onplay cannot undo stop or newer playback',async()=>{
+ useAudioStore.getState().playAudio('/first','first');const oldReject=rejectPlay;
+ useAudioStore.getState().stopAudio();oldReject(new Error('interrupted'));await Promise.resolve();
+ assert.equal(useAudioStore.getState().playbackState,'stopped');
+ useAudioStore.getState().audioElement.onplay();assert.equal(useAudioStore.getState().playbackState,'stopped');
+ useAudioStore.getState().playAudio('/second','second');
+ assert.equal(useAudioStore.getState().playbackState,'speaking');useAudioStore.getState().stopAudio();
+});
+test('microphone status does not change a running computer task to idle',()=>{
+ useJarvisStore.setState({orbState:'acting'});
+ useJarvisStore.getState().setIsListening(true);useJarvisStore.getState().setIsListening(false);
+ assert.equal(useJarvisStore.getState().orbState,'acting');
+});

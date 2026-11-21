@@ -111,6 +111,7 @@ export function BasicChat() {
     else setId(next);
   }
   return <main className="basic-chat">
+      <p role="status">Basic chat has no wake word. <a href="/">Open the updated Jarvis voice interface →</a></p>
     <header className="chat-bar"><div className="chat-wordmark"><AudioLines size={22}/> Jarvis</div>
       <nav aria-label="Chat controls">
         <button disabled={!!pending} onClick={() => setHistory(!history)} aria-expanded={history}><History size={17}/> History</button>

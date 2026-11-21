@@ -16,6 +16,8 @@ import { AgentsView } from './components/views/AgentsView';
 import { MemoryView } from './components/views/MemoryView';
 import { SettingsView } from './components/views/SettingsView';
 import { SystemView } from './components/views/SystemView';
+import { VoiceAssistant } from './voice/VoiceAssistant';
+import { RuntimeBadge } from './components/RuntimeBadge';
 import './conversation.css';
 import './network.css';
 
@@ -58,8 +60,9 @@ export function App() {
   const latestUser=messages.filter(m=>m.role==='user').slice(-1)[0];
   const latestReply=messages.filter(m=>m.role==='assistant' && m.content).slice(-1)[0];
   const busy=orbState==='thinking'||orbState==='acting';
-  const phase=orbState==='error' && !pendingApprovals.length?'Check gateway status':!online?'Gateway offline':pendingApprovals.length?'Approval needed':isListening?'Listening':busy?'Working on your request':playbackState==='speaking'?'Speaking':['generating','buffering'].includes(playbackState)?'Preparing voice reply':'Ready to talk';
+  const phase=orbState==='error' && !pendingApprovals.length?'Check gateway status':!online?'Gateway offline':pendingApprovals.length?'Approval needed':busy?'Working on your request':playbackState==='speaking'?'Speaking — talk to interrupt':isListening?'Microphone on':['generating','buffering'].includes(playbackState)?'Preparing voice reply':'Ready to talk';
   return <div className="jarvis-shell network-shell">
+    <VoiceAssistant onUnsent={setDraft}/>
     {menu && <button className="rail-backdrop" onClick={()=>setMenu(false)} aria-label="Close navigation"/>}
     <aside className={'network-rail '+(menu?'opened':'')} aria-label="Sidebar">
       <div className="rail-brand"><span className="mini-core"/>Jarvis<button onClick={()=>setMenu(false)} aria-label="Close navigation"><X size={18}/></button></div>
@@ -73,7 +76,7 @@ export function App() {
       <button className="rail-account" onClick={()=>open('Account')}><CircleUser/><span>Owner account</span><ChevronsUpDown size={14}/></button>
     </aside>
     <div className="network-workspace"><header className="network-title"><button onClick={()=>setMenu(true)} aria-label="Open navigation"><Menu size={18}/></button>
-      <h1>{page}</h1><button className="halt" onClick={triggerEmergencyStop} aria-label="Emergency stop" title="Emergency stop"><ShieldAlert size={16}/></button></header>
+      <h1>{page}</h1><RuntimeBadge/><button className="halt" onClick={triggerEmergencyStop} aria-label="Emergency stop" title="Emergency stop"><ShieldAlert size={16}/></button></header>
       <main className="network-surface">
         {actionError && <p className="action-error" role="alert">{actionError}</p>}
         {page==='Needs you'?<Decisions/>:page==='Planner' ? <Planner/> : page==='Inbox'||page==='Calendar' ? <WorkspaceInbox key={page} initial={page}/> : <>

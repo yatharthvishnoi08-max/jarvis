@@ -16,12 +16,14 @@ interface AudioState {
 }
 
 export const useAudioStore = create<AudioState>((set, get) => {
+  let playbackGeneration = 0;
+  let allowPlayback = false;
   const audio = typeof Audio !== 'undefined' ? new Audio() : null;
 
   if (audio) {
-    audio.onplay = () => set({ playbackState: 'speaking' });
-    audio.onended = () => set({ playbackState: 'idle', activeAudioId: null });
-    audio.onerror = () => set({ playbackState: 'error' });
+    audio.onplay = () => { if (allowPlayback) set({ playbackState: 'speaking' }); else audio.pause(); };
+    audio.onended = () => { if (allowPlayback) { allowPlayback = false; set({ playbackState: 'idle', activeAudioId: null }); } };
+    audio.onerror = () => { if (allowPlayback) set({ playbackState: 'error' }); };
   }
 
   return {
@@ -70,16 +72,20 @@ export const useAudioStore = create<AudioState>((set, get) => {
       const el = get().audioElement;
       if (!el) return;
 
+      const generation = ++playbackGeneration;
+      allowPlayback = true;
       el.pause();
       el.src = url;
       set({ playbackState: 'buffering', activeAudioId: audioId || null });
       el.play().catch((err) => {
+        if (generation !== playbackGeneration) return;
         console.warn('Playback prevented by browser policy:', err);
         set({ playbackState: 'error' });
       });
     },
 
     stopAudio: () => {
+      ++playbackGeneration; allowPlayback = false;
       const el = get().audioElement;
       if (el) {
         el.pause();
