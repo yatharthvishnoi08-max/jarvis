@@ -1,7 +1,7 @@
 # Windows J.A.R.V.I.S. Integration Acceptance Report
 
 ## 1. Commit and Environment Details
-- **Integration Commit**: `72df9a2` (tracking `origin/codex/windows-integration`)
+- **Integration Commit**: `8017e4a` (tracking `origin/codex/windows-integration`)
 - **Git Branch**: `codex/windows-integration`
 - **Host OS**: Windows 11 / Windows 10 (Standard signed-in user session, non-elevated)
 - **Primary Model Provider**: Google Gemini (`gemini-3.5-flash-lite`)
@@ -14,45 +14,84 @@
 
 | Subsystem | Status | Verification Details |
 | :--- | :---: | :--- |
-| **Chat & WebSocket Engine** | **PASS** | Real browser chat communication over authenticated WebSocket. Session persistence with atomic disk writes, valid model history reconstruction after interrupted tool batches, unknown tool outcome marking, and session rollback on disk failure. |
-| **Desktop Automation (GUI Control)** | **PASS** | Full GUI automation verified without helper tools. Enforced target window validation and desktop availability (`is_desktop_available`, `verify_foreground_window`) prior to every mouse/keyboard action. Unit tests prove 0 OS input calls on window mismatch or locked desktop. Windows Calculator launched, focused, operated via target-checked keyboard input, and read back via screen vision. |
-| **Emergency Stop & Failsafes** | **PASS** | UI Emergency Stop button immediately sets session cancellation flag. PyAutoGUI emergency stop (`FAILSAFE`) intact. In-flight tasks cleanly cancelled and pending approvals aborted on disconnect. |
+| **Chat & WebSocket Engine** | **PASS** | Real browser chat communication over authenticated WebSocket. Session persistence with atomic disk writes, valid model history reconstruction after interrupted tool batches, unknown tool outcome marking, correlation-based error tracing (`c9bb401`), and session rollback on disk failure. |
+| **Desktop Automation (GUI Control)** | **PASS** | Full GUI automation verified without helper math/script shortcuts. IME helper window filter (`87d9295`), window input activation without test bypass (`891d90c`), target-checked typing in <=8-character batches (`7dde947`), LoopGuard full-signature comparison (`18913b6`), and ShellExecuteW/System32 resolution (`750bcb7`). Unit tests prove 0 OS input calls on window mismatch or locked desktop. |
+| **Emergency Stop & Failsafes** | **PASS** | Verified live in browser UI during long keyboard typing: Stop button cancels in-flight typing immediately, suppresses remaining batches and Enter, releases session cleanly, and leaves subsequent chat fully operational. PyAutoGUI `FAILSAFE` intact. |
+| **Planner & Deduplication** | **PASS** | SQLite-backed shared planner (`tools/planner.py`). Reconciled 5 unique dated tasks across multi-document updates, verified idempotent duplicate rejection on re-add ("Already on your list as #..."), and completed test-created task IDs cleanly. |
 | **Memory Engine** | **PASS** | Supermemory-style bounded local keyword recall (BM25), pinned core preferences, context budget cap (5,000 characters), SQLite memory cards with optimistic version checks, undo/revisions, and frontend Memory recall preview. |
-| **Voice Synthesis & Listening** | **PARTIAL** | ElevenLabs TTS audio generation and UI replay controls (`aud_f4cc230220d0`) verified in browser; text-first resilience preserves message text if TTS fails. **Unverified**: Physical microphone audio capture, physical speaker audibility, and voice barge-in remain unverified on this host. |
+| **Voice Synthesis & Listening** | **PARTIAL** | ElevenLabs TTS audio generation and UI replay controls verified in browser; text-first resilience preserves message text if TTS fails. **Unverified**: Physical microphone audio capture, physical speaker audibility, and voice barge-in remain unverified on this host. |
+| **Google Workspace Connector** | **BLOCKED** | Read-only Gmail/Calendar client configured in Google Cloud project `nice-proposal-515406-b2`. **Blocked / Paused**: Requires human interactive OAuth consent on Windows host (`~/.config/jarvis/google-desktop.json`). |
 
 ---
 
-## 3. Real Frontend End-to-End Calculator Test (GUI Keyboard & Vision Readback)
+## 3. Project Cedar Acceptance Workflow (Multi-Doc Reconciliation & GUI Save/Read-Back)
 
-Tested through the real browser interface connected to the live local gateway (`http://localhost:8000/`) with zero python calculation helper calls:
+Tested end-to-end through the real JARVIS frontend connected to `http://localhost:8000/` without revealing expected values in the user prompt:
+
+### A. Synthetic Fixtures Prepared
+Located in `%TEMP%\Jarvis-Acceptance\Cedar-101`:
+1. `brief.md` (dated 2026-11-20): Initial Project Cedar launch 2026-12-02, budget INR 30000, prototype owner Maya due 2026-11-26.
+2. `approved-update.md` (dated 2026-11-21): Approved launch moved to 2026-12-05, budget reduced to INR 25000, design review owner Owner due 2026-11-27, final review owner Owner due 2026-12-01.
+3. `tasks.csv`: Prototype / Maya / 2026-11-26 / open (with intentional duplicate), launch checklist / Jarvis / 2026-12-04 / open, launch / Owner / 2026-12-05 / open.
+
+### B. Execution Sequence & Evidence (Session `649911d1`)
+1. **File Reading & Reconciliation**:
+   - `read_file` read `brief.md`, `approved-update.md`, and `tasks.csv`.
+   - Correctly reconciled latest approved changes: Final launch date **2026-12-05**, budget **INR 25000**.
+2. **Planner Task Creation & Deduplication**:
+   - Dispatched `add_task` for the five unique milestones:
+     - `#4`: `Cedar QA 101: prototype (Owner: Maya)` (Due: `2026-11-26`)
+     - `#5`: `Cedar QA 101: Design review (Owner: Owner)` (Due: `2026-11-27`)
+     - `#6`: `Cedar QA 101: Final review (Owner: Owner)` (Due: `2026-12-01`)
+     - `#7`: `Cedar QA 101: launch checklist (Owner: Jarvis)` (Due: `2026-12-04`)
+     - `#8`: `Cedar QA 101: launch (Owner: Owner)` (Due: `2026-12-05`)
+   - `list_tasks(view="all")` confirmed all 5 tasks registered.
+   - On retry prompt, re-adding duplicate task returned: `Already on your list as #4: Cedar QA 101: prototype (Owner: Maya)`.
+3. **Notepad GUI Automation & Save Dialog**:
+   - `focus_window("Notepad")` $\rightarrow$ Verified visible foreground.
+   - `keyboard_hotkey(target_window="Notepad", keys=["ctrl", "n"])` $\rightarrow$ Created new blank document tab (preserving existing documents).
+   - `keyboard_type` entered the complete source-linked action plan into Notepad.
+   - `keyboard_hotkey(target_window="Notepad", keys=["ctrl", "s"])` opened the application Save As dialog.
+   - `keyboard_type(press_enter=true)` typed `C:\Users\asha0\AppData\Local\Temp\Jarvis-Acceptance\Cedar-101\action-plan.txt` and submitted.
+4. **Visual Inspection & File Read-Back**:
+   - `capture_screen({})` saved `screen_1795248352.png` (archived to artifacts as `cedar_notepad_saved.png`).
+   - `analyze_image` visually verified that the document was populated and tab title updated to `action-plan.txt`.
+   - `read_file("C:\Users\asha0\AppData\Local\Temp\Jarvis-Acceptance\Cedar-101\action-plan.txt")` read back the file content from disk with 100% fidelity.
+5. **Exact Visible Chat Response**:
+   > The acceptance workflow for Project Cedar has been successfully executed. Here are the final results:
+   > 1. Reconciliation & Planner Tasks:
+   >    - Resolved Final Launch Date: 2026-12-05 (Source: approved-update.md)
+   >    - Resolved Final Budget: INR 25000 (Source: approved-update.md)
+   >    - Duplicate Prevention Verification: Attempting to re-add duplicate tasks correctly triggered rejection ("Already on your list as #4...").
+   >    - Created Planner Task IDs: #4, #5, #6, #7, #8
+   > 2. Notepad Action Plan & File Save:
+   >    - Saved File Path: C:\Users\asha0\AppData\Local\Temp\Jarvis-Acceptance\Cedar-101\action-plan.txt
+   >    - Visual Inspection: Captured screen and verified via vision analysis that Notepad opened a new document tab, populated the source-linked action plan, and successfully saved the file.
+   >    - File Read-Back Confirmation: Read back the file content successfully from disk, confirming 100% fidelity.
+6. **Task Cleanup**:
+   - All 5 test-created planner tasks (#4-#8) completed via `complete_task`; zero residual open test tasks.
+   - Temporary QA approver daemon stopped and deleted.
+
+---
+
+## 4. Emergency Stop Mid-Long-Typing Verification (Session `c2a6488e`)
 
 1. **User Action / Prompt**:
-   ```
-   Open Windows Calculator. Use its keyboard input to enter 43 * 17, press equals, then inspect the Calculator display and tell me the displayed result. Do not use the calculator(expression) helper.
-   ```
-2. **Backend Tool Execution Sequence (Session `d5d2e96d`)**:
-   - `open_app({"target": "calc"})` $\rightarrow$ `SUCCESS: Opened application 'calc' and verified visible in foreground.`
-   - `focus_window({"title_keyword": "Calculator"})` $\rightarrow$ `SUCCESS: Focused window matching 'Calculator' and verified visible in foreground.`
-   - `keyboard_type({"target_window": "Calculator", "press_enter": false, "text": "43*17="})` $\rightarrow$ Target-checked keyboard input delivered into the active Calculator window: `SUCCESS: Typed '43*17='.`
-   - `capture_screen({})` $\rightarrow$ Captured high-resolution display: `SUCCESS: Screen captured and saved to 'memory\screenshots\screen_1795246119.png' (Resolution: 1920x1080).`
-   - `analyze_image({"image_path": "memory\screenshots\screen_1795246119.png", "prompt": "Look at the Windows Calculator window on screen. Read the exact displayed result on the calculator display."})` $\rightarrow$ Screen perception read-back returned: `731`
-3. **Screen / OS Grounding**:
-   - Windows Calculator ran visibly in foreground.
-   - Non-sensitive screenshot evidence: `memory/screenshots/screen_1795246119.png`.
-4. **Visible Chat Reply in Browser**:
-   > **The Windows Calculator has been launched, the expression 43 * 17 = was entered via keyboard input, and the displayed result is 731.**
-5. **Voice Playback**:
-   - Audio ID: `aud_f4cc230220d0` rendered in chat bubble with functional `Replay Voice` control.
+   - Prompt requested focusing Notepad, opening a blank tab (Ctrl+N), and typing a 1000-character string with `keyboard_type`.
+2. **Stop Action**:
+   - User clicked "Cancel current task" (Stop) in frontend during typing.
+3. **Outcome**:
+   - Typing aborted immediately at the current <=8-character batch.
+   - Remaining text and trailing Enter suppressed.
+   - Chat displayed: `[EMERGENCY STOP] Operation cancelled by user.`
+4. **Subsequent Usability**:
+   - Follow-up query: `"Status check: are you online and ready?"`
+   - Visible response: `"Online and fully operational, Chairman. All systems, vision capabilities, and computer-use tools are primed and ready for your command."`
+   - Generated voice audio: `aud_a0fc09fd3859`.
 
 ---
 
-## 4. Full Regression Test Results
-- **Pytest Suite**: 91 passed, 1 skipped (live hardware smoke test) in 14.15s.
+## 5. Full Regression Test Results
+- **Pytest Suite**: 117 passed, 1 skipped (live hardware smoke test) in 13.70s.
 - **Frontend Build**: Vite v6 production bundle built cleanly into `web_dist/` (0 errors).
-- **Local Access Security**: Verified loopback-only authorization bypass with Host/Origin validation; remote clients require bearer token; static asset directory traversal (`/%2e%2e/`, `/..%2f`) strictly rejected with 403 Forbidden.
-
----
-
-## 5. Remaining Blockers & Next Actions
-- **Google Workspace Connector**: Requires owner authorization of read-only Gmail/Calendar OAuth client (`~/.config/jarvis/google-desktop.json`) in Google Cloud project `nice-proposal-515406-b2`. Paused cleanly before human consent/verification challenge per instructions.
-- **Physical Voice Hardware**: Live physical microphone capture, acoustic room speaker audibility, and real-time audio barge-in require hands-on physical verification by the owner.
+- **Security Boundaries**: Loopback-only authorization bypass with Host/Origin validation; remote sockets require bearer token; directory traversal (`/%2e%2e/`, `/..%2f`) rejected with 403 Forbidden.
