@@ -42,3 +42,5 @@
 .voice-live-transcript { max-width:48rem; margin:.5rem auto 0; font-size:.875rem; color:#c3b5bf; overflow-wrap:anywhere; }
 
 .runtime-badge{margin-left:auto;display:flex;flex-direction:column;text-align:right;font:11px monospace;color:#8faaa8;max-width:65%;overflow-wrap:anywhere}.runtime-badge strong{color:#f4bc80;font-size:11px}.voice-conversation-status{flex-wrap:wrap}.voice-conversation-status small{font-size:10px;opacity:.7}
+
+.runtime-badge{color:#59635f}.runtime-badge small{font-size:11px;line-height:1.4}

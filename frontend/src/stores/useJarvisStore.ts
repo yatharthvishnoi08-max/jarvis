@@ -271,7 +271,7 @@ export const useJarvisStore = create<JarvisState>((set, get) => {
         reconnectTimer = null;
       }
       const socket = get().ws;
-      set({ ws: null, orbState: 'disconnected' });
+      set({ ws: null, orbState: 'disconnected', voiceConversation: false });
       if (socket) {
         socket.close();
       }

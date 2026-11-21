@@ -7,7 +7,11 @@ import { useVoiceStore } from '../stores/useVoiceStore';
 /** Mounted once for the whole authenticated app, including Planner and Settings. */
 export function VoiceAssistant({onUnsent, onWake}: {onUnsent: (text: string) => void; onWake: () => void}) {
   const retry = useVoiceStore(s => s.retry);
+  const wakeEnabled = useVoiceStore(s => s.wakeEnabled);
+  const conversation = useJarvisStore(s => s.voiceConversation);
+  const wanted = wakeEnabled || conversation;
   useEffect(() => {
+    if (!wanted) return;
     const Recognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!Recognition || !window.isSecureContext) {
       useVoiceStore.setState({hint: 'Voice needs Chrome or Edge at http://localhost:8000 or HTTPS. This page cannot start speech recognition.'});
@@ -15,6 +19,7 @@ export function VoiceAssistant({onUnsent, onWake}: {onUnsent: (text: string) => 
     }
     let disposed = false, syncing = false, release: (() => void) | undefined;
     let ownsMic = !navigator.locks;
+    const lockAbort = new AbortController();
     let session = useJarvisStore.getState().currentSessionId;
     const controller = new VoiceConversation(() => new Recognition(), {
       send: text => {
@@ -23,7 +28,7 @@ export function VoiceAssistant({onUnsent, onWake}: {onUnsent: (text: string) => 
         return accepted;
       },
       listening: value => useJarvisStore.getState().setIsListening(value),
-      awake: value => { useJarvisStore.getState().setVoiceConversation(value); if (value) { useJarvisStore.getState().setVoiceEnabled(true); onWake(); } },
+      awake: value => { if (disposed) return; useJarvisStore.getState().setVoiceConversation(value); if (value) { useJarvisStore.getState().setVoiceEnabled(true); onWake(); } },
       transcript: text => useVoiceStore.setState({transcript: text}),
       interrupt: () => useJarvisStore.getState().interruptSpeech(),
       error: hint => useVoiceStore.setState({hint}),
@@ -50,15 +55,15 @@ export function VoiceAssistant({onUnsent, onWake}: {onUnsent: (text: string) => 
     };
     const unsub = [useJarvisStore.subscribe(sync), useAudioStore.subscribe(sync), useVoiceStore.subscribe(sync)];
     if (navigator.locks) {
-      void navigator.locks.request('jarvis-voice-microphone', {ifAvailable: true}, async lock => {
+      useVoiceStore.setState({hint: 'Waiting for microphone access. Close other Jarvis tabs if this message stays here.'});
+      void navigator.locks.request('jarvis-voice-microphone', {signal: lockAbort.signal}, async () => {
         if (disposed) return;
-        if (!lock) { useVoiceStore.setState({hint: 'Another Jarvis tab owns the microphone. Close that tab, then click Enable microphone here.'}); return; }
-        ownsMic = true; sync();
+        ownsMic = true; useVoiceStore.setState({hint: ''}); sync();
         await new Promise<void>(resolve => { release = resolve; });
-      }).catch(() => useVoiceStore.setState({hint: 'Could not reserve the microphone. Reload this page to retry.'}));
+      }).catch(() => { if (!disposed) useVoiceStore.setState({hint: 'Could not reserve the microphone. Reload this page to retry.'}); });
     }
     sync();
-    return () => { disposed = true; unsub.forEach(fn => fn()); controller.stop(); release?.(); };
-  }, [onUnsent, onWake, retry]);
+    return () => { disposed = true; unsub.forEach(fn => fn()); controller.stop(); lockAbort.abort(); release?.(); };
+  }, [onUnsent, onWake, retry, wanted]);
   return null;
 }

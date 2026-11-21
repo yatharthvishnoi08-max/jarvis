@@ -15,7 +15,7 @@ export const Composer: React.FC<{text:string;setText:(value:string)=>void}> = ({
       setVoiceConversation(false); setWakeEnabled(false);
       useJarvisStore.getState().interruptSpeech(); return;
     }
-    retryMicrophone(); useJarvisStore.getState().setVoiceEnabled(true); setVoiceConversation(true);
+    if (micHint) retryMicrophone(); useJarvisStore.getState().setVoiceEnabled(true); setVoiceConversation(true);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
