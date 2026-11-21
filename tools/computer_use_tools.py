@@ -547,6 +547,29 @@ def _bring_app_window_to_foreground(keyword: str, timeout: float = 3.0) -> bool:
         pass
     return False
 
+def _activate_window_input(target_window: str) -> tuple[bool, str]:
+    """Activate input on the verified foreground window; never select a different matching window."""
+    valid, reason = _enforce_desktop_and_target(target_window)
+    if not valid:
+        return False, reason
+    if not PYAUTOGUI_AVAILABLE:
+        return False, "PyAutoGUI is unavailable."
+    try:
+        import pygetwindow as gw
+        window = gw.getActiveWindow()
+        if window is None or window.width <= 30 or window.height <= 30:
+            return False, "No usable foreground window."
+        valid, reason = _enforce_desktop_and_target(target_window)
+        current = gw.getActiveWindow()
+        if not valid or current is None or current._hWnd != window._hWnd:
+            return False, "Foreground changed before input activation. " + reason
+        pyautogui.FAILSAFE = True
+        pyautogui.click(window.left + min(150, window.width // 2), window.top + 15)
+        return verify_foreground_window(target_window)
+    except Exception as exc:
+        return False, f"Window input activation was interrupted ({type(exc).__name__})."
+
+
 def open_app(target: str) -> str:
     """
     Opens any Windows application by name, executable, URI, or file path,
@@ -615,18 +638,9 @@ def open_app(target: str) -> str:
     while time.time() - start < 4.0:
         verified, _ = verify_foreground_window(expected_window)
         if verified:
-            try:
-                if not os.environ.get("PYTEST_CURRENT_TEST"):
-                    from tools.multimodal_tools import _ensure_input_desktop
-                    _ensure_input_desktop()
-                    import pygetwindow as gw
-                    matches = [w for w in gw.getAllWindows() if expected_window in w.title.lower()]
-                    if matches:
-                        w = matches[0]
-                        if w.width > 30 and w.height > 30:
-                            pyautogui.click(w.left + min(150, w.width // 2), w.top + 15)
-            except Exception:
-                pass
+            activated, reason = _activate_window_input(expected_window)
+            if not activated:
+                return f"ERROR: Application opened but input activation failed: {reason}"
             return f"SUCCESS: Opened application '{clean_target}' and verified visible in foreground."
         time.sleep(0.3)
 
@@ -645,24 +659,11 @@ def focus_window(title_keyword: str) -> str:
 
     # First attempt: Win32 InputDesktop Window Normalizer
     _bring_app_window_to_foreground(clean_keyword, timeout=2.0)
-    try:
-        if not os.environ.get("PYTEST_CURRENT_TEST"):
-            from tools.multimodal_tools import _ensure_input_desktop
-            _ensure_input_desktop()
-            import pygetwindow as gw
-            matches = [w for w in gw.getAllWindows() if clean_keyword in w.title.lower()]
-            if matches:
-                target_win = matches[0]
-                if target_win.isMinimized:
-                    target_win.restore()
-                target_win.activate()
-                time.sleep(0.2)
-                if target_win.width > 30 and target_win.height > 30:
-                    pyautogui.click(target_win.left + min(150, target_win.width // 2), target_win.top + 15)
-    except Exception:
-        pass
     verified, _ = verify_foreground_window(clean_keyword)
     if verified:
+        activated, reason = _activate_window_input(clean_keyword)
+        if not activated:
+            return f"ERROR: Input activation failed: {reason}"
         return f"SUCCESS: Focused window matching '{title_keyword}' and verified visible in foreground."
 
     # Second attempt: pygetwindow
@@ -677,6 +678,9 @@ def focus_window(title_keyword: str) -> str:
             time.sleep(0.3)
             verified, _ = verify_foreground_window(clean_keyword)
             if verified:
+                activated, reason = _activate_window_input(clean_keyword)
+                if not activated:
+                    return f"ERROR: Input activation failed: {reason}"
                 return f"SUCCESS: Focused window '{target_win.title}' and verified visible in foreground."
     except Exception:
         pass
@@ -693,6 +697,9 @@ if ($success) {{ Write-Output "SUCCESS" }} else {{ Write-Output "NOT_FOUND" }}
             time.sleep(0.3)
             verified, _ = verify_foreground_window(clean_keyword)
             if verified:
+                activated, reason = _activate_window_input(clean_keyword)
+                if not activated:
+                    return f"ERROR: Input activation failed: {reason}"
                 return f"SUCCESS: Activated application matching '{title_keyword}' and verified visible in foreground."
     except Exception:
         pass

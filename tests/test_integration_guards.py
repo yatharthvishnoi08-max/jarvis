@@ -63,6 +63,7 @@ def test_app_alias_is_used_for_launch(monkeypatch):
     from tools import computer_use_tools as computer
     monkeypatch.setattr(computer, 'is_desktop_available', lambda: (True, 'OK'))
     monkeypatch.setattr(computer, '_bring_app_window_to_foreground', lambda *args, **kwargs: True)
+    monkeypatch.setattr(computer, '_activate_window_input', lambda _: (True, 'OK'))
     monkeypatch.setattr(computer, 'verify_foreground_window', lambda _: (True, 'OK'))
     launch = Mock()
     monkeypatch.setattr(computer.subprocess, 'Popen', launch)
