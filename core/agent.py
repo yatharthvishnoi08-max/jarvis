@@ -893,6 +893,12 @@ def reasoning_turn_limit() -> int:
     return max(1, min(value, 60))
 
 
+DESKTOP_RESULT_TOOLS = frozenset({
+    "open_app", "focus_window", "mouse_click", "mouse_move", "mouse_scroll", "mouse_drag",
+    "keyboard_type", "keyboard_press", "keyboard_hotkey", "click_screen_element",
+})
+
+
 class JarvisAgent:
     def __init__(self):
         self.model_name = model_name()
@@ -1145,6 +1151,10 @@ class JarvisAgent:
 
                 step_duration = round(time.time() - start_time, 3)
                 clean_result = redact_secrets(str(raw_result))
+                # Desktop functions return explicit ERROR strings for rejected
+                # input. A normal Python return is not proof the action succeeded.
+                if fn_name in DESKTOP_RESULT_TOOLS and clean_result.startswith("ERROR"):
+                    step_error = clean_result[:500]
 
                 trace_steps.append(ToolExecutionStep(
                     tool_name=fn_name,
@@ -1161,6 +1171,7 @@ class JarvisAgent:
                     args=args,
                     policy=policy_level,
                     status="SUCCESS" if not step_error else "ERROR",
+                    detail=clean_result[:200] if step_error else "",
                     duration_ms=int(step_duration * 1000)
                 )
 
