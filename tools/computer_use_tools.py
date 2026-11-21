@@ -615,6 +615,18 @@ def open_app(target: str) -> str:
     while time.time() - start < 4.0:
         verified, _ = verify_foreground_window(expected_window)
         if verified:
+            try:
+                if not os.environ.get("PYTEST_CURRENT_TEST"):
+                    from tools.multimodal_tools import _ensure_input_desktop
+                    _ensure_input_desktop()
+                    import pygetwindow as gw
+                    matches = [w for w in gw.getAllWindows() if expected_window in w.title.lower()]
+                    if matches:
+                        w = matches[0]
+                        if w.width > 30 and w.height > 30:
+                            pyautogui.click(w.left + min(150, w.width // 2), w.top + 15)
+            except Exception:
+                pass
             return f"SUCCESS: Opened application '{clean_target}' and verified visible in foreground."
         time.sleep(0.3)
 
@@ -633,6 +645,22 @@ def focus_window(title_keyword: str) -> str:
 
     # First attempt: Win32 InputDesktop Window Normalizer
     _bring_app_window_to_foreground(clean_keyword, timeout=2.0)
+    try:
+        if not os.environ.get("PYTEST_CURRENT_TEST"):
+            from tools.multimodal_tools import _ensure_input_desktop
+            _ensure_input_desktop()
+            import pygetwindow as gw
+            matches = [w for w in gw.getAllWindows() if clean_keyword in w.title.lower()]
+            if matches:
+                target_win = matches[0]
+                if target_win.isMinimized:
+                    target_win.restore()
+                target_win.activate()
+                time.sleep(0.2)
+                if target_win.width > 30 and target_win.height > 30:
+                    pyautogui.click(target_win.left + min(150, target_win.width // 2), target_win.top + 15)
+    except Exception:
+        pass
     verified, _ = verify_foreground_window(clean_keyword)
     if verified:
         return f"SUCCESS: Focused window matching '{title_keyword}' and verified visible in foreground."
