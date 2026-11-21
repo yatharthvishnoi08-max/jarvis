@@ -35,6 +35,39 @@ class Session:
     def reset_cancellation(self):
         self._is_cancelled = False
 
+    def model_history(self) -> List[Dict[str, Any]]:
+        """Build valid tool-call history after a stop, crash or interrupted approval.
+
+        Keep saved evidence intact. A missing result is explicitly unknown, never
+        represented as a successful action or replayed automatically.
+        """
+        history = []
+        pending = {}
+
+        def close_interrupted_calls():
+            for call_id in pending:
+                history.append({"role": "tool", "tool_call_id": call_id,
+                                "content": "Interrupted: no result was recorded for this tool call. "
+                                           "Its outcome is unknown. Inspect the current state before retrying an action."})
+            pending.clear()
+
+        for saved in self.messages:
+            if saved["role"] == "tool":
+                call_id = saved.get("tool_call_id")
+                if call_id not in pending:
+                    continue
+                history.append({"role": "tool", "tool_call_id": call_id, "content": saved["content"]})
+                pending.pop(call_id)
+                continue
+            close_interrupted_calls()
+            message = {"role": saved["role"], "content": saved["content"]}
+            if saved.get("tool_calls"):
+                message["tool_calls"] = saved["tool_calls"]
+                pending.update((call["id"], True) for call in saved["tool_calls"])
+            history.append(message)
+        close_interrupted_calls()
+        return history
+
     @property
     def is_cancelled(self) -> bool:
         return self._is_cancelled
@@ -56,6 +89,7 @@ class Session:
             "tool_call_id": tool_call_id,
             "audio_id": audio_id
         }
+        old_title, old_updated_at = self.title, self.updated_at
         self.messages.append(msg)
         self.updated_at = int(time.time())
         
@@ -65,7 +99,12 @@ class Session:
             if clean_title:
                 self.title = clean_title
 
-        self.save()
+        try:
+            self.save()
+        except Exception:
+            self.messages.remove(msg)
+            self.title, self.updated_at = old_title, old_updated_at
+            raise
         return msg
 
     def save(self):
