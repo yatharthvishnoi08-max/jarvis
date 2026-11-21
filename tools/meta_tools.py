@@ -54,9 +54,10 @@ def log_learned_rule(category: str, rule: str) -> str:
     except Exception as e:
         return f"ERROR logging rule: {str(e)}"
 
-def read_memory() -> str:
-    """Reads all learned rules, user preferences, and operational memories."""
+def read_memory(query: str = "") -> str:
+    """Recalls relevant memories and the bounded core profile."""
     try:
-        return memory_store.memory_text()
+        from tools.memory_recall import recall
+        return recall(query)['context']
     except Exception as e:
         return f"ERROR reading memory: {str(e)}"

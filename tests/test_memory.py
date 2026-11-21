@@ -35,16 +35,16 @@ def test_chat_and_ui_share_corrections_expiry_and_undo(monkeypatch):
         corrected = {'version': 1, 'category': 'USER_PREF', 'rule': 'Use brief answers'}
         assert client.put(url, headers=headers, json=corrected).status_code == 200
         assert client.put(url, headers=headers, json=corrected).status_code == 409
-        prompt = JarvisAgent().build_system_prompt()
+        prompt = JarvisAgent().build_system_prompt('How should you write your answers?')
         assert 'Use brief answers' in prompt and 'Use detailed answers' not in prompt
         assert client.put(url, headers=headers, json={'version': 2, 'action': 'undo'}).status_code == 200
-        assert 'Use detailed answers' in meta_tools.read_memory()
+        assert 'Use detailed answers' in meta_tools.read_memory('answers')
         assert client.put(url, headers=headers, json={'version': 3, 'action': 'archive'}).status_code == 200
-        assert 'Use detailed answers' not in meta_tools.read_memory()
+        assert 'Use detailed answers' not in meta_tools.read_memory('answers')
         assert client.put(url, headers=headers, json={'version': 4, 'action': 'restore'}).status_code == 200
-        assert 'Use detailed answers' in meta_tools.read_memory()
+        assert 'Use detailed answers' in meta_tools.read_memory('answers')
         assert client.put(url, headers=headers, json={**corrected, 'version': 5, 'expires_at': '2000-01-01T00:00:00Z'}).status_code == 200
-        assert 'Use brief answers' not in meta_tools.read_memory()
+        assert 'Use brief answers' not in meta_tools.read_memory('answers')
         assert client.get('/api/memory', headers=headers).json()['records'][0]['expired'] is True
 
 

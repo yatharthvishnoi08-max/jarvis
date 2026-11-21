@@ -23,7 +23,8 @@ def _store():
         db.execute("""CREATE TABLE IF NOT EXISTS memories (
             id INTEGER PRIMARY KEY, category TEXT NOT NULL, rule TEXT NOT NULL,
             source TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
-            expires_at TEXT, archived INTEGER NOT NULL DEFAULT 0, version INTEGER NOT NULL DEFAULT 1
+            expires_at TEXT, archived INTEGER NOT NULL DEFAULT 0, version INTEGER NOT NULL DEFAULT 1,
+            pinned INTEGER NOT NULL DEFAULT 0
         )""")
         db.execute("""CREATE TABLE IF NOT EXISTS revisions (
             memory_id INTEGER NOT NULL, version INTEGER NOT NULL, snapshot TEXT NOT NULL,
@@ -31,6 +32,8 @@ def _store():
         )""")
         db.execute("CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY)")
         db.execute("BEGIN IMMEDIATE")
+        if 'pinned' not in {row['name'] for row in db.execute('PRAGMA table_info(memories)')}:
+            db.execute('ALTER TABLE memories ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0')
         if not db.execute("SELECT 1 FROM metadata WHERE key='legacy_imported'").fetchone():
             if LEGACY_FILE.exists():
                 for line in LEGACY_FILE.read_text(encoding="utf-8").splitlines():
@@ -66,21 +69,21 @@ def list_memories(include_inactive=False):
     return rows if include_inactive else [r for r in rows if not r['archived'] and not r['expired']]
 
 
-def add_memory(category: str, rule: str, source='Owner in Memory', expires_at=None):
+def add_memory(category: str, rule: str, source='Owner in Memory', expires_at=None, pinned=False):
     category, rule, expires_at = _validate(category, rule, expires_at)
     with _store() as db:
         # Repeated clicks/model retries should not create duplicate active preferences.
         prior = db.execute("""SELECT * FROM memories WHERE category=? AND rule=? AND archived=0
-            AND expires_at IS ?""", (category, rule, expires_at)).fetchone()
+            AND expires_at IS ? AND pinned=?""", (category, rule, expires_at, int(pinned))).fetchone()
         if prior:
             return dict(prior)
         stamp = _now()
-        cursor = db.execute("""INSERT INTO memories(category, rule, source, created_at, updated_at, expires_at)
-            VALUES (?, ?, ?, ?, ?, ?)""", (category, rule, source, stamp, stamp, expires_at))
+        cursor = db.execute("""INSERT INTO memories(category, rule, source, created_at, updated_at, expires_at, pinned)
+            VALUES (?, ?, ?, ?, ?, ?, ?)""", (category, rule, source, stamp, stamp, expires_at, int(pinned)))
         return dict(db.execute("SELECT * FROM memories WHERE id=?", (cursor.lastrowid,)).fetchone())
 
 
-def change_memory(memory_id: int, version: int, *, action='edit', category=None, rule=None, expires_at=None):
+def change_memory(memory_id: int, version: int, *, action='edit', category=None, rule=None, expires_at=None, pinned=None):
     with _store() as db:
         found = db.execute("SELECT * FROM memories WHERE id=?", (memory_id,)).fetchone()
         if not found:
@@ -91,6 +94,8 @@ def change_memory(memory_id: int, version: int, *, action='edit', category=None,
         new = dict(old)
         if action == 'edit':
             new['category'], new['rule'], new['expires_at'] = _validate(category, rule, expires_at)
+            if pinned is not None:
+                new['pinned'] = int(pinned)
         elif action == 'archive':
             new['archived'] = 1
         elif action == 'restore':
@@ -103,8 +108,8 @@ def change_memory(memory_id: int, version: int, *, action='edit', category=None,
         else:
             raise ValueError("Unknown memory action.")
         db.execute("INSERT INTO revisions VALUES (?, ?, ?)", (memory_id, old['version'], json.dumps(old)))
-        db.execute("""UPDATE memories SET category=?, rule=?, expires_at=?, archived=?, updated_at=?, version=version+1
-            WHERE id=?""", (new['category'], new['rule'], new['expires_at'], new['archived'], _now(), memory_id))
+        db.execute("""UPDATE memories SET category=?, rule=?, expires_at=?, archived=?, pinned=?, updated_at=?, version=version+1
+            WHERE id=?""", (new['category'], new['rule'], new['expires_at'], new['archived'], new.get('pinned', 0), _now(), memory_id))
         return dict(db.execute("SELECT * FROM memories WHERE id=?", (memory_id,)).fetchone())
 
 
