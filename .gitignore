@@ -46,3 +46,6 @@ certs/
 memory/planner.sqlite3*
 memory/memories.sqlite3*
 
+# Scratch scripts
+scratch/
+

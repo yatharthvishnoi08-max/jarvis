@@ -22,7 +22,7 @@ def test_smart_client_initialization():
     assert isinstance(client, SmartLLMClient)
     assert model_name in ["gemini-3.5-flash-lite", "gemini-flash-latest", "gemini-3.6-flash"]
     assert len(client.fallback_models) >= 2
-    assert client.backup_model == "meta-llama/llama-3.3-70b-instruct"
+    assert client.backup_model in ["meta-llama/llama-3.3-70b-instruct:free", "meta-llama/llama-3.3-70b-instruct"]
 
 def test_total_registered_tools_count():
     assert len(TOOL_SCHEMAS) >= 33, f"Expected at least 33 tools, found {len(TOOL_SCHEMAS)}"

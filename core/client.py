@@ -33,8 +33,9 @@ GEMINI_DEFAULT_FALLBACKS = [
 ]
 
 OPENROUTER_DEFAULT_FALLBACKS = [
-    "meta-llama/llama-3.3-70b-instruct",
-    "nousresearch/hermes-3-llama-3.1-70b",
+    "meta-llama/llama-3.3-70b-instruct:free",
+    "google/gemini-2.0-flash-exp:free",
+    "nousresearch/hermes-3-llama-3.1-70b:free",
 ]
 
 
@@ -221,7 +222,7 @@ def get_client() -> Tuple[SmartLLMClient, str]:
                     "X-Title": "Personal-JARVIS"
                 }
             )
-            backup_model = "meta-llama/llama-3.3-70b-instruct"
+            backup_model = "meta-llama/llama-3.3-70b-instruct:free"
 
         client = SmartLLMClient(
             primary_client,
@@ -240,7 +241,7 @@ def get_client() -> Tuple[SmartLLMClient, str]:
             )
 
         base_url = os.getenv("API_BASE_URL", "").strip() or "https://openrouter.ai/api/v1"
-        model_name_val = os.getenv("MODEL_NAME", "").strip() or "meta-llama/llama-3.3-70b-instruct"
+        model_name_val = os.getenv("MODEL_NAME", "").strip() or "meta-llama/llama-3.3-70b-instruct:free"
         fallback_models = [m for m in OPENROUTER_DEFAULT_FALLBACKS if m != model_name_val]
 
         primary_client = OpenAI(
