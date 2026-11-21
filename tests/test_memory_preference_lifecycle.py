@@ -25,13 +25,13 @@ def test_remembered_preference_lifecycle(tmp_path, monkeypatch):
     assert memories[0]["rule"] == pref_text
     assert memories[0]["version"] == 1
 
-    # 3. Verify read_memory includes it
-    mem_text = read_memory()
+    # 3. Verify read_memory includes it via relevant keyword recall
+    mem_text = read_memory("calendar format")
     assert pref_text in mem_text
 
-    # 4. Restart simulation: re-instantiate JarvisAgent and verify system prompt includes it
+    # 4. Restart simulation: re-instantiate JarvisAgent and verify system prompt includes it for calendar request
     agent_after_restart = JarvisAgent()
-    sys_prompt = agent_after_restart.build_system_prompt()
+    sys_prompt = agent_after_restart.build_system_prompt("Check my calendar for tomorrow")
     assert pref_text in sys_prompt
 
     # 5. Apply correction (edit memory with optimistic version check)
@@ -48,6 +48,6 @@ def test_remembered_preference_lifecycle(tmp_path, monkeypatch):
 
     # 6. Verify correction reflected in system prompt of a new session
     agent_corrected = JarvisAgent()
-    new_prompt = agent_corrected.build_system_prompt()
+    new_prompt = agent_corrected.build_system_prompt("Format 12-hour output notation")
     assert corrected_text in new_prompt
     assert pref_text not in new_prompt
