@@ -1,7 +1,7 @@
 # Windows J.A.R.V.I.S. Integration Acceptance Report
 
 ## 1. Commit and Environment Details
-- **Integration Commit**: `9ad185c` (tracking `origin/codex/windows-integration`)
+- **Integration Commit**: `f83e284` (tracking `origin/codex/windows-integration`)
 - **Git Branch**: `codex/windows-integration`
 - **Host OS**: Windows 11 / Windows 10 (Standard signed-in user session, non-elevated)
 - **Primary Model Provider**: Google Gemini (`gemini-3.5-flash-lite`)
@@ -124,3 +124,16 @@ Located in `%TEMP%\Jarvis-Acceptance\Cedar-101`:
 - **Pytest Suite**: 117 passed, 1 skipped (live hardware smoke test) in 13.70s.
 - **Frontend Build**: Vite v6 production bundle built cleanly into `web_dist/` (0 errors).
 - **Security Boundaries**: Loopback-only authorization bypass with Host/Origin validation; remote sockets require bearer token; directory traversal (`/%2e%2e/`, `/..%2f`) rejected with 403 Forbidden.
+
+---
+
+## 6. Activity UI Validation (Readable Outcomes & Accessibility)
+
+- **Cherry-picked Commit**: `f83e284` (upstream `bfd8082` on `origin/codex/windows-acceptance-review`)
+- **Frontend Build**: Built cleanly with Vite v6 (`tsc && vite build`) in 5.51s into `web_dist/`.
+- **Live Interface Verification (`http://localhost:8000/`)**:
+  - **Status Formatting**: Real tool errors appear as `Failed` with alert badge styling rather than raw uppercase codes.
+  - **Readable Failure Detail**: Verified untruncated display of failure detail: `ERROR: Operation cancelled by user. Stopped after 329 characters; text may be partial.`.
+  - **Full Argument Disclosure**: Interacting with `<details><summary>View details</summary>` expands and renders complete, multi-line formatted JSON parameters without truncation.
+  - **Keyboard Accessibility & Focus Trap**: Pressing `Escape` cleanly dismisses the modal sheet and returns focus immediately to the `ACTIVITY` navigation button; panel reopens cleanly on trigger.
+  - **Artifact Link**: [activity_panel_verified.png](file:///C:/Users/asha0/.gemini/antigravity/brain/10f936d3-63ca-470e-8451-1aa2cc7f0aef/activity_panel_verified.png)
