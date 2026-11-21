@@ -101,3 +101,8 @@
 .workspace-inbox a:hover {text-decoration:underline;}
 .workspace-inbox li p {margin-top:.2rem!important;}
 .workspace-inbox code {overflow-wrap:anywhere;}
+.decisions ul {margin-top:1.5rem;}
+.decisions li {justify-content:space-between;align-items:flex-start;}
+.decisions li h3 {margin:.3rem 0;font-size:1rem;overflow-wrap:anywhere;}
+.decisions li button {border-radius:1rem;padding:.35rem .7rem;flex-shrink:0;}
+.decisions li a {display:inline-flex;align-items:center;gap:.3rem;color:#e0b7ca;font-size:.8rem;}

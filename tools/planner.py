@@ -83,3 +83,15 @@ def complete_task(task_id: int) -> str:
             return f"Already completed #{task_id}: {row[0]}"
         db.execute("UPDATE tasks SET done=1 WHERE id=?", (task_id,))
         return f"Completed #{task_id}: {row[0]}"
+
+
+def handled_decisions() -> set:
+    with _store() as db:
+        db.execute("CREATE TABLE IF NOT EXISTS handled (decision_id TEXT PRIMARY KEY)")
+        return {row[0] for row in db.execute("SELECT decision_id FROM handled")}
+
+
+def handle_decision(decision_id: str):
+    with _store() as db:
+        db.execute("CREATE TABLE IF NOT EXISTS handled (decision_id TEXT PRIMARY KEY)")
+        db.execute("INSERT OR IGNORE INTO handled VALUES (?)", (decision_id,))

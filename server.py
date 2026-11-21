@@ -31,7 +31,7 @@ from core.session import session_manager, Session
 from core.speaker import ElevenLabsSpeaker
 from core.agent import JarvisAgent
 from core.client import ModelConfigurationError
-from tools import planner
+from tools import briefing, planner
 from tools.meta_tools import EMPLOYEES_DIR, MEMORY_FILE, read_memory, update_employee_sop, log_learned_rule
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -239,6 +239,28 @@ async def get_telemetry(auth: bool = Depends(authenticate_request)):
         "active_model": agent.model_name,
         "voice_configured": bool(speaker.api_key)
     }
+
+class HandleDecision(BaseModel):
+    id: str
+
+
+@app.get("/api/briefing")
+def get_briefing(auth: bool = Depends(authenticate_request)):
+    return {"items": briefing.items(workspace_snapshot), "google_state": workspace_snapshot["state"]}
+
+
+@app.post("/api/briefing/handled")
+def handle_briefing_item(item: HandleDecision, auth: bool = Depends(authenticate_request)):
+    if not item.id.startswith(("mail:", "calendar:")) or len(item.id) > 1024:
+        raise HTTPException(status_code=422, detail="Invalid decision identifier.")
+    planner.handle_decision(item.id)
+    return {"handled": True}
+
+
+@app.get("/api/workspace/status")
+def get_workspace_status(auth: bool = Depends(authenticate_request)):
+    return {"state": workspace_snapshot["state"], "checked_at": workspace_snapshot["checked_at"]}
+
 
 @app.get("/api/workspace")
 def get_workspace(auth: bool = Depends(authenticate_request)):

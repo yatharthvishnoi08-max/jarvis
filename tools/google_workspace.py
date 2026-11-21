@@ -64,15 +64,17 @@ def read_workspace():
                 continue
             headers = {h["name"].lower(): h["value"] for h in latest.get("payload", {}).get("headers", [])}
             inbox.append({"id":entry["id"], "title":headers.get("subject") or "(No subject)",
-                          "sender":headers.get("from", ""), "unread":"UNREAD" in labels})
+                          "version":latest.get("id", latest.get("internalDate", "")),
+                          "preview":latest.get("snippet", ""), "sender":headers.get("from", ""), "unread":"UNREAD" in labels})
         now = datetime.now(timezone.utc)
         calendar = get("https://www.googleapis.com/calendar/v3/calendars/primary/events",
                        singleEvents="true", orderBy="startTime", timeMin=now.isoformat(),
                        timeMax=(now+timedelta(days=7)).isoformat(), maxResults=30,
-                       fields="items(id,summary,start,status)")
+                       fields="items(id,summary,start,end,status,transparency)")
         events = [{"id":e["id"], "title":e.get("summary", "Busy"),
+                   "end":e.get("end", {}).get("dateTime") or e.get("end", {}).get("date"),
                    "start":e["start"].get("dateTime") or e["start"].get("date")}
-                  for e in calendar.get("items", []) if e.get("status") != "cancelled" and e.get("start")]
+                  for e in calendar.get("items", []) if e.get("status") != "cancelled" and e.get("start") and e.get("transparency") != "transparent"]
     return {"inbox":inbox, "events":events, "checked_at":now.isoformat()}
 
 

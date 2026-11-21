@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { Activity, AudioLines, Brain, CalendarDays, FileText, Folder, HardDrive, Instagram, Mail, MessageSquare, Monitor, Notebook, Radio, Sheet, Users, Youtube } from 'lucide-react';
 
+import { useAuthStore } from '../stores/useAuthStore';
+
 export type Destination = 'Talk' | 'Dashboard' | 'Memory' | 'Assistant' | 'Files' | 'Voice' | 'Inbox' | 'Calendar';
 const nodes = [
   {name:'Voice', x:49, y:22, icon:AudioLines, action:'Voice'},
@@ -51,17 +53,34 @@ export function NetworkMap({online, onOpen, onActivity, approvals}:{
   online:boolean; onOpen:(d:Destination)=>void; onActivity:()=>void; approvals:number
 }) {
   const [info,setInfo]=useState('');
+  const [googleOnline,setGoogleOnline]=useState(false);
+  const token=useAuthStore(s=>s.token);
+  useEffect(()=>{
+    const controller=new AbortController();
+    async function check(){
+      try {
+        const r=await fetch('/api/workspace/status',{headers:{Authorization:'Bearer '+token},signal:controller.signal});
+        const status=r.ok?await r.json():null;
+        if(!controller.signal.aborted)setGoogleOnline(status?.state==='connected');
+      } catch {if(!controller.signal.aborted)setGoogleOnline(false);}
+    }
+    void check(); const timer=setInterval(check,30000);
+    return ()=>{controller.abort();clearInterval(timer);};
+  },[token]);
+  function linked(n:typeof nodes[number]){
+    return 'action' in n ? online : googleOnline && (n.name==='Gmail'||n.name==='Calendar');
+  }
   return <section className="network-map" aria-label="Jarvis network">
     <div className="map-meta"><small>Neural network</small><p>{online ? 'Gateway connected' : 'Gateway offline'}</p></div>
     <div className="map-tools"><span className="map-live">{online ? 'Live' : 'Offline'}</span>
       <button onClick={onActivity}><Activity size={14}/> Activity {approvals || ''}</button></div>
     <div className="map-space">
       <svg className="map-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-        {nodes.map((n,i)=><g key={n.name}><line x1="50" y1="51" x2={n.x} y2={n.y} className={'action' in n && online ? 'on' : ''}/>
+        {nodes.map((n,i)=><g key={n.name}><line x1="50" y1="51" x2={n.x} y2={n.y} className={linked(n) ? 'on' : ''}/>
           <line x1={n.x} y1={n.y} x2={nodes[(i+4)%nodes.length].x} y2={nodes[(i+4)%nodes.length].y} className="mesh"/></g>)}
       </svg>
       <button className="map-core" aria-label="Talk to Jarvis" onClick={()=>onOpen('Talk')}><NeuralCore/></button>
-      {nodes.map(n=><button key={n.name} className={'map-node '+('action' in n ? 'local' : 'external')} style={{left:n.x+'%',top:n.y+'%'}}
+      {nodes.map(n=><button key={n.name} className={'map-node '+(linked(n) ? 'local' : 'external')} style={{left:n.x+'%',top:n.y+'%'}}
         title={'action' in n ? 'Open '+n.name : n.name==='Gmail'||n.name==='Calendar'?'Open '+n.name:n.name+' · Not connected'}
         onClick={()=>{if('action' in n) {setInfo(''); onOpen(n.action);} else if(n.name==='Gmail' || n.name==='Calendar') onOpen(n.name==='Gmail'?'Inbox':'Calendar'); else setInfo(n.name+' is not connected.');}}>
         <span style={{color:'color' in n?n.color:undefined}}><n.icon/></span><small>{n.name}</small>

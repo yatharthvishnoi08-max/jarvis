@@ -43,3 +43,19 @@ def test_disconnected_workspace_is_private(tmp_path, monkeypatch):
         assert client.get("/api/workspace").status_code == 401
         data = client.get("/api/workspace", headers={"Authorization": f"Bearer {server.OWNER_TOKEN}"}).json()
         assert data["state"] == "disconnected" and data["inbox"] == []
+
+
+def test_briefing_handles_one_version_and_detects_overlap(tmp_path, monkeypatch):
+    from tools import planner, briefing
+    monkeypatch.setattr(planner, "DATABASE", tmp_path / "tasks.sqlite3")
+    planner.add_task("Review plan", "today")
+    events = [{"id":k, "title":k, "start":"2026-11-24T15:00:00+05:30", "end":"2026-11-24T16:00:00+05:30"} for k in ["a","b"]]
+    mail = {"id":"thread", "version":"1", "title":"Please confirm by today"}
+    snapshot = {"state":"connected", "inbox":[mail], "events":events}
+    rows = briefing.items(snapshot)
+    assert {r["kind"] for r in rows} == {"email","task","conflict"}
+    assert rows[0]["kind"] == "email"
+    planner.handle_decision(rows[0]["id"])
+    assert "email" not in [r["kind"] for r in briefing.items(snapshot)]
+    mail["version"]="2"
+    assert "email" in [r["kind"] for r in briefing.items(snapshot)]
