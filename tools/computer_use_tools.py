@@ -706,6 +706,10 @@ def open_app(target: str) -> str:
             if activated:
                 return f"SUCCESS: Opened application '{clean_target}' and verified visible in foreground."
             last_err = reason
+            # Poll only while a newly launched window is not usable yet. Do not
+            # retry an input exception, Stop, or changed focus with more clicks.
+            if reason != "No usable foreground window.":
+                return f"ERROR: Application opened but input activation failed: {reason}"
         time.sleep(0.3)
 
     if last_err:
