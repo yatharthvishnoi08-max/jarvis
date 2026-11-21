@@ -30,7 +30,7 @@ class LoopGuard:
     def __init__(self, config: Optional[LoopGuardConfig] = None):
         self.config = config or LoopGuardConfig()
         self._call_counts: Dict[str, int] = {}
-        self._tool_sequence: deque[str] = deque(maxlen=self.config.ping_pong_window * 2)
+        self._tool_sequence: deque[tuple[str, str]] = deque(maxlen=self.config.ping_pong_window * 2)
         self._warned_signatures: Set[str] = set()
 
     def _hash_call(self, tool_name: str, args: Any) -> str:
@@ -44,7 +44,7 @@ class LoopGuard:
         call_sig = self._hash_call(tool_name, args)
         count = self._call_counts.get(call_sig, 0) + 1
         self._call_counts[call_sig] = count
-        self._tool_sequence.append(tool_name)
+        self._tool_sequence.append((tool_name, call_sig))
 
         # 1. Identical call check
         if count >= self.config.max_identical_calls:
@@ -59,21 +59,22 @@ class LoopGuard:
                 reason=f"LOOP GUARD TRIPPED: Tool '{tool_name}' exceeded maximum repetition limit ({self.config.max_identical_calls} calls)."
             )
 
-        # 2. Ping-pong cycle detection (e.g. A-B-A-B)
+        # 2. Detect repeated CALLS, not merely alternating tool names. Typing a
+        # document and then a Save As path are different steps, not a stuck loop.
         seq = list(self._tool_sequence)
         if len(seq) >= 4:
             # Check length 2 cycle: A B A B
             if seq[-1] == seq[-3] and seq[-2] == seq[-4] and seq[-1] != seq[-2]:
-                cycle_key = f"{seq[-2]}:{seq[-1]}"
+                cycle_key = f"{seq[-2][1]}:{seq[-1][1]}"
                 if cycle_key not in self._warned_signatures:
                     self._warned_signatures.add(cycle_key)
                     return LoopVerdict(
                         warned=True,
-                        reason=f"Ping-pong cycle detected between '{seq[-2]}' and '{seq[-1]}'."
+                        reason=f"Ping-pong cycle detected between '{seq[-2][0]}' and '{seq[-1][0]}'."
                     )
                 return LoopVerdict(
                     blocked=True,
-                    reason=f"LOOP GUARD TRIPPED: Detected cycling pattern between '{seq[-2]}' and '{seq[-1]}'."
+                    reason=f"LOOP GUARD TRIPPED: Detected cycling pattern between '{seq[-2][0]}' and '{seq[-1][0]}'."
                 )
 
         return LoopVerdict(blocked=False)
