@@ -938,13 +938,7 @@ class JarvisAgent:
 
         # Assemble conversation history for the LLM
         messages = [{"role": "system", "content": self.build_system_prompt()}]
-        for m in session.messages:
-            msg_obj = {"role": m["role"], "content": m["content"]}
-            if m.get("tool_calls"):
-                msg_obj["tool_calls"] = m["tool_calls"]
-            if m.get("tool_call_id"):
-                msg_obj["tool_call_id"] = m["tool_call_id"]
-            messages.append(msg_obj)
+        messages.extend(session.model_history())
 
         max_turns = 10
         loop = asyncio.get_event_loop()
