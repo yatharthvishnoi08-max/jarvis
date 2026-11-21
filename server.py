@@ -3,6 +3,7 @@ import json
 import time
 import socket
 import asyncio
+from contextlib import asynccontextmanager
 import psutil
 from pathlib import Path
 from typing import Optional, List, Dict, Any
@@ -50,7 +51,36 @@ DEFAULT_ALLOWED_ORIGINS = [
 env_origins = os.getenv("ALLOWED_ORIGINS", "")
 ALLOWED_ORIGINS = [o.strip() for o in env_origins.split(",") if o.strip()] if env_origins else DEFAULT_ALLOWED_ORIGINS
 
-app = FastAPI(title="JARVIS Interface v3 Core Gateway")
+workspace_snapshot = {"state": "disconnected", "inbox": [], "events": [], "checked_at": None}
+
+
+async def monitor_workspace():
+    from tools import google_workspace
+
+    while True:
+        if google_workspace.TOKEN.is_file():
+            try:
+                snapshot = await asyncio.to_thread(google_workspace.read_workspace)
+                workspace_snapshot.update(snapshot, state="connected")
+            except Exception:
+                # Keep message contents and OAuth errors out of logs.
+                workspace_snapshot["state"] = "sync_error"
+        else:
+            workspace_snapshot.update(state="disconnected", inbox=[], events=[], checked_at=None)
+        await asyncio.sleep(300)
+
+
+@asynccontextmanager
+async def lifespan(application):
+    monitor = asyncio.create_task(monitor_workspace())
+    try:
+        yield
+    finally:
+        monitor.cancel()
+        await asyncio.gather(monitor, return_exceptions=True)
+
+
+app = FastAPI(lifespan=lifespan, title="JARVIS Interface v3 Core Gateway")
 
 app.add_middleware(
     CORSMiddleware,
@@ -209,6 +239,11 @@ async def get_telemetry(auth: bool = Depends(authenticate_request)):
         "active_model": agent.model_name,
         "voice_configured": bool(speaker.api_key)
     }
+
+@app.get("/api/workspace")
+def get_workspace(auth: bool = Depends(authenticate_request)):
+    return workspace_snapshot
+
 
 # Owner planner. Chat tools and the dashboard share one store.
 class PlannerItem(BaseModel):

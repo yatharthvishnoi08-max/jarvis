@@ -95,3 +95,9 @@
 .planner-page li span {flex:1;overflow-wrap:anywhere;}
 .planner-page li small,.planner-page p {font-size:.83rem;color:#c1b5bc;}
 .planner-page p:not(:empty) {margin-top:.75rem;}
+.workspace-tabs {display:flex;gap:.4rem;}
+.workspace-tabs button {padding:.5rem 1rem;border:1px solid #50454c;border-radius:1rem;}
+.workspace-tabs button[aria-pressed=true] {color:#f4c8db;background:#362932;}
+.workspace-inbox a:hover {text-decoration:underline;}
+.workspace-inbox li p {margin-top:.2rem!important;}
+.workspace-inbox code {overflow-wrap:anywhere;}

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Activity, AudioLines, Brain, CalendarDays, FileText, Folder, HardDrive, Instagram, Mail, MessageSquare, Monitor, Notebook, Radio, Sheet, Users, Youtube } from 'lucide-react';
 
-export type Destination = 'Talk' | 'Dashboard' | 'Memory' | 'Assistant' | 'Files' | 'Voice';
+export type Destination = 'Talk' | 'Dashboard' | 'Memory' | 'Assistant' | 'Files' | 'Voice' | 'Inbox' | 'Calendar';
 const nodes = [
   {name:'Voice', x:49, y:22, icon:AudioLines, action:'Voice'},
   {name:'Chat', x:69, y:41, icon:MessageSquare, action:'Talk'},
@@ -62,8 +62,8 @@ export function NetworkMap({online, onOpen, onActivity, approvals}:{
       </svg>
       <button className="map-core" aria-label="Talk to Jarvis" onClick={()=>onOpen('Talk')}><NeuralCore/></button>
       {nodes.map(n=><button key={n.name} className={'map-node '+('action' in n ? 'local' : 'external')} style={{left:n.x+'%',top:n.y+'%'}}
-        title={'action' in n ? 'Open '+n.name : n.name+' · Not connected'}
-        onClick={()=>{if('action' in n) {setInfo(''); onOpen(n.action);} else setInfo(n.name+' is not connected.');}}>
+        title={'action' in n ? 'Open '+n.name : n.name==='Gmail'||n.name==='Calendar'?'Open '+n.name:n.name+' · Not connected'}
+        onClick={()=>{if('action' in n) {setInfo(''); onOpen(n.action);} else if(n.name==='Gmail' || n.name==='Calendar') onOpen(n.name==='Gmail'?'Inbox':'Calendar'); else setInfo(n.name+' is not connected.');}}>
         <span style={{color:'color' in n?n.color:undefined}}><n.icon/></span><small>{n.name}</small>
       </button>)}
     </div>
