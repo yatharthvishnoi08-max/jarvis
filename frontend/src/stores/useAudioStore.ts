@@ -75,7 +75,7 @@ export const useAudioStore = create<AudioState>((set, get) => {
       set({ playbackState: 'buffering', activeAudioId: audioId || null });
       el.play().catch((err) => {
         console.warn('Playback prevented by browser policy:', err);
-        set({ playbackState: 'idle' });
+        set({ playbackState: 'error' });
       });
     },
 

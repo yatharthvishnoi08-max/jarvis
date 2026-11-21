@@ -21,6 +21,8 @@ from core.approvals import (
 )
 from core.session import Session, session_manager
 from core.execution_control import run_tool
+from core.context_window import model_window
+from core.inference_errors import user_message
 from tools.planner import add_task, complete_task, list_tasks
 from tools.system_tools import (
     execute_powershell,
@@ -970,20 +972,27 @@ class JarvisAgent:
                 session.add_message(role="assistant", content=msg)
                 return msg
 
+            request_messages = model_window(messages)
             # Run LLM completion in thread to prevent blocking the event loop
             try:
                 response = await loop.run_in_executor(
                     None,
                     lambda: self.client.chat.completions.create(
                         model=self.model_name,
-                        messages=messages,
+                        messages=request_messages,
                         tools=TOOL_SCHEMAS,
                         tool_choice="auto",
                         temperature=0.3
                     )
                 )
             except Exception as e:
-                err_text = f"LLM Inference Error: {str(e)}"
+                if session.is_cancelled:
+                    err_text = 'Stopped. I will not continue this task.'
+                else:
+                    err_text = user_message(e, actions_attempted=bool(trace_steps))
+                    audit_logger.log_event('MODEL_REQUEST_FAILED', session_id=session.id, status='ERROR',
+                                           detail=err_text, error_type=type(e).__name__,
+                                           status_code=getattr(e, 'status_code', None))
                 session.add_message(role="assistant", content=err_text)
                 return err_text
 

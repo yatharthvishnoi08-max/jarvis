@@ -48,7 +48,7 @@ export function App() {
     setMenu(false);setPanel(null);
     if(view==='Network'||view==='Talk'||view==='Planner'||view==='Inbox'||view==='Calendar'||view==='Needs you') setPage(view);
     else if(view==='Files') {setDraft('Show my recent downloads.');setPage('Talk');}
-    else if(view==='Voice') {document.querySelector<HTMLButtonElement>('.jarvis-composer button[type="button"]')?.focus();}
+    else if(view==='Voice') {setPage('Talk'); useJarvisStore.getState().setVoiceEnabled(true); useJarvisStore.getState().setVoiceConversation(true);}
     else setPanel(view);
   }
   if(isLoading) return <div className="p-6">Opening Jarvis…</div>;

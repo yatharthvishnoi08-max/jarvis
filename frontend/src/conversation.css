@@ -34,3 +34,9 @@
 .jarvis-shell button:focus-visible { outline:2px solid #a9e6cf; outline-offset:2px; }
 @media(max-width:650px) { .jarvis-bar { gap:.65rem; } .jarvis-bar nav button { padding:.3rem; min-width:30px; justify-content:center; } .jarvis-bar nav button span { display:none; } .jarvis-shortcuts { gap:.4rem; } .jarvis-shortcuts button { padding:.55rem .75rem; } .jarvis-shortcuts button svg:last-child { display:none; } .jarvis-start { gap:.1rem; } }
 @media(max-height:560px) { .signal-field { width:4.5rem; } .jarvis-start h1,.jarvis-shortcuts { margin-top:.6rem; } }
+
+.voice-conversation-status { display:flex; align-items:center; gap:.55rem; max-width:48rem; margin:.7rem auto 0; color:#e8bfd0; font-size:.875rem; flex-wrap:wrap; }
+.voice-conversation-status button { margin-left:auto; padding:.35rem .65rem; border:1px solid #95637b; border-radius:8px; color:#f2cede; }
+.voice-dot { width:7px; height:7px; background:#94808c; border-radius:50%; }
+.voice-dot.listening { background:#efb3c5; box-shadow:0 0 10px #efb3c577; }
+.voice-live-transcript { max-width:48rem; margin:.5rem auto 0; font-size:.875rem; color:#c3b5bf; overflow-wrap:anywhere; }

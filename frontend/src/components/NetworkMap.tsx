@@ -79,7 +79,7 @@ export function NetworkMap({online, onOpen, onActivity, approvals}:{
         {nodes.map((n,i)=><g key={n.name}><line x1="50" y1="51" x2={n.x} y2={n.y} className={linked(n) ? 'on' : ''}/>
           <line x1={n.x} y1={n.y} x2={nodes[(i+4)%nodes.length].x} y2={nodes[(i+4)%nodes.length].y} className="mesh"/></g>)}
       </svg>
-      <button className="map-core" aria-label="Talk to Jarvis" onClick={()=>onOpen('Talk')}><NeuralCore/></button>
+      <button className="map-core" aria-label="Start voice conversation" onClick={()=>onOpen('Voice')}><NeuralCore/></button>
       {nodes.map(n=><button key={n.name} className={'map-node '+(linked(n) ? 'local' : 'external')} style={{left:n.x+'%',top:n.y+'%'}}
         title={'action' in n ? 'Open '+n.name : n.name==='Gmail'||n.name==='Calendar'?'Open '+n.name:n.name+' · Not connected'}
         onClick={()=>{if('action' in n) {setInfo(''); onOpen(n.action);} else if(n.name==='Gmail' || n.name==='Calendar') onOpen(n.name==='Gmail'?'Inbox':'Calendar'); else setInfo(n.name+' is not connected.');}}>

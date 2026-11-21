@@ -19,6 +19,9 @@ interface JarvisState {
   voiceEnabled: boolean;
   isEmergencyStopped: boolean;
   isListening: boolean;
+  voiceConversation: boolean;
+  pendingAudioMessageId: string | null;
+  setVoiceConversation: (enabled: boolean) => void;
 
   // Actions
   setOrbState: (state: OrbState) => void;
@@ -57,6 +60,9 @@ export const useJarvisStore = create<JarvisState>((set, get) => {
     voiceEnabled: true,
     isEmergencyStopped: false,
     isListening: false,
+    voiceConversation: false,
+    pendingAudioMessageId: null,
+    setVoiceConversation: (enabled: boolean) => set({ voiceConversation: enabled }),
 
     setOrbState: (state: OrbState) => set({ orbState: state }),
     setVoiceEnabled: (enabled: boolean) => set({ voiceEnabled: enabled }),
@@ -192,7 +198,9 @@ export const useJarvisStore = create<JarvisState>((set, get) => {
               break;
 
             case 'response':
+              if (get().voiceEnabled && data.voice_pending) useAudioStore.setState({ playbackState: 'generating' });
               set({
+                pendingAudioMessageId: data.message_id || null,
                 orbState: 'idle',
                 currentTool: null,
                 currentThought: null
@@ -220,6 +228,9 @@ export const useJarvisStore = create<JarvisState>((set, get) => {
               set(state => ({ messages: state.messages.map(m => m.id === data.message_id
                 ? { ...m, audio_id: data.audio_id, audio_url: data.audio_url, voiceUnavailable: !data.audio_id }
                 : m) }));
+              if (data.message_id !== get().pendingAudioMessageId) break;
+              set({ pendingAudioMessageId: null });
+              if (!data.audio_url) useAudioStore.setState({ playbackState: 'idle' });
               if (data.audio_url && get().voiceEnabled && !get().isEmergencyStopped) {
                 useAudioStore.getState().playAudio(data.audio_url, data.audio_id);
               }
@@ -234,7 +245,10 @@ export const useJarvisStore = create<JarvisState>((set, get) => {
               break;
 
             case 'error':
+              useAudioStore.getState().stopAudio();
               set({
+                voiceConversation: false,
+                pendingAudioMessageId: null,
                 orbState: 'error',
                 currentTool: null,
                 currentThought: null,
@@ -317,7 +331,7 @@ export const useJarvisStore = create<JarvisState>((set, get) => {
     switchSession: async (sessionId: string) => {
       const request = ++selection;
       const socket = get().ws;
-      set({ currentSessionId: '', messages: [], orbState: 'disconnected' });
+      set({ currentSessionId: '', messages: [], orbState: 'disconnected', voiceConversation: false, pendingAudioMessageId: null });
       useAudioStore.getState().stopAudio();
       const token = useAuthStore.getState().token;
       try {
@@ -373,6 +387,8 @@ export const useJarvisStore = create<JarvisState>((set, get) => {
         return false;
       }
 
+      useAudioStore.getState().stopAudio();
+      set({ pendingAudioMessageId: null, isEmergencyStopped: false });
       // Add user message to UI immediately
       const userMsg: Message = {
         id: `msg_${Date.now()}`,
@@ -428,7 +444,7 @@ export const useJarvisStore = create<JarvisState>((set, get) => {
     },
 
     cancelSession: async () => {
-      set({actionError: null});
+      set({actionError: null, voiceConversation: false, pendingAudioMessageId: null});
       useAudioStore.getState().stopAudio();
       const token = useAuthStore.getState().token;
       const sessionId = get().currentSessionId;
@@ -450,7 +466,7 @@ export const useJarvisStore = create<JarvisState>((set, get) => {
     },
 
     triggerEmergencyStop: async () => {
-      set({actionError: null, isEmergencyStopped: true});
+      set({actionError: null, isEmergencyStopped: true, voiceConversation: false, pendingAudioMessageId: null});
       useAudioStore.getState().stopAudio();
       const token = useAuthStore.getState().token;
       try {

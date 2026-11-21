@@ -1,71 +1,68 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useJarvisStore } from '../stores/useJarvisStore';
+import { useAudioStore } from '../stores/useAudioStore';
+import { VoiceConversation } from '../voice/VoiceConversation';
 import { Send, Mic, MicOff, Square, WifiOff, RotateCw } from 'lucide-react';
 
 export const Composer: React.FC<{text:string;setText:(value:string)=>void}> = ({text,setText}) => {
-  const { sendMessage, orbState, cancelSession, isListening, setIsListening, ws, pendingApprovals } = useJarvisStore();
+  const { sendMessage, orbState, cancelSession, isListening, setIsListening, ws, pendingApprovals, voiceConversation, setVoiceConversation } = useJarvisStore();
   const online = ws?.readyState === WebSocket.OPEN;
   const [micHint, setMicHint] = useState('');
   const { connectionError, retryConnection } = useJarvisStore();
-  const recognitionRef = useRef<any>(null);
+  const [liveTranscript, setLiveTranscript] = useState('');
+  const playbackState = useAudioStore(s => s.playbackState);
+  const controllerRef = useRef<VoiceConversation | null>(null);
 
   useEffect(() => {
-    // Setup Browser Web Speech API if supported
-    const SpeechRecognition =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    const Recognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!Recognition || !window.isSecureContext) return;
+    const controller = new VoiceConversation(() => new Recognition(), {
+      send: transcript => { const accepted = sendMessage(transcript); if (!accepted) setText(transcript); return accepted; },
+      listening: setIsListening,
+      transcript: setLiveTranscript,
+      error: message => { setMicHint(message); setVoiceConversation(false); },
+    });
+    controllerRef.current = controller;
+    let session = useJarvisStore.getState().currentSessionId;
+    const sync = () => {
+      const state = useJarvisStore.getState();
+      if (session !== state.currentSessionId || state.isEmergencyStopped || document.hidden || !state.ws || state.ws.readyState !== WebSocket.OPEN) {
+        session = state.currentSessionId;
+        if (state.voiceConversation) { setVoiceConversation(false); return; }
+      }
+      controller.setBlocked(!state.ws || state.ws.readyState !== WebSocket.OPEN ||
+        state.pendingApprovals.length > 0 || ['thinking', 'acting', 'error', 'disconnected'].includes(state.orbState) ||
+        ['generating', 'buffering', 'speaking'].includes(useAudioStore.getState().playbackState));
+      if (state.voiceConversation) controller.start(); else controller.stop();
+    };
+    const stopJarvis = useJarvisStore.subscribe(sync);
+    const stopAudio = useAudioStore.subscribe(sync);
+    document.addEventListener('visibilitychange', sync);
+    sync();
+    return () => {
+      stopJarvis(); stopAudio(); document.removeEventListener('visibilitychange', sync);
+      controller.stop(); controllerRef.current = null; setVoiceConversation(false);
+    };
+  }, [sendMessage, setIsListening, setVoiceConversation, setText]);
 
-    if (SpeechRecognition) {
-      const recognition = new SpeechRecognition();
-      recognition.continuous = false;
-      recognition.interimResults = false;
-      recognition.lang = 'en-US';
-
-      recognition.onstart = () => {
-        setIsListening(true);
-      };
-
-      recognition.onresult = (event: any) => {
-        const transcript = event.results[0][0].transcript;
-        if (transcript) {
-          if (!sendMessage(transcript)) setText(transcript);
-        }
-      };
-
-      recognition.onerror = (event: any) => {
-        console.warn('Speech recognition error:', event.error);
-        setMicHint('Could not hear you. Check microphone permission or use your keyboard’s dictation.');
-        setIsListening(false);
-      };
-
-      recognition.onend = () => {
-        setIsListening(false);
-      };
-
-      recognitionRef.current = recognition;
-      return () => {
-        recognition.onresult = recognition.onstart = recognition.onerror = recognition.onend = null;
-        recognition.abort();
-        recognitionRef.current = null;
-      };
+  useEffect(() => {
+    if (voiceConversation && (!(window as any).SpeechRecognition && !(window as any).webkitSpeechRecognition || !window.isSecureContext)) {
+      setVoiceConversation(false);
+      setMicHint('Voice needs Chrome or Edge with microphone access on localhost or HTTPS. You can still type here.');
     }
-  }, [setIsListening, sendMessage]);
+  }, [voiceConversation, setVoiceConversation]);
 
   const toggleMic = () => {
-    setMicHint('');
-    if (!window.isSecureContext || !recognitionRef.current) {
-      setMicHint('Use your phone keyboard’s dictation, then tap Send. The in-app mic needs HTTPS and a supported browser.');
+    setMicHint(''); setLiveTranscript('');
+    if (voiceConversation) {
+      setVoiceConversation(false); useJarvisStore.getState().setVoiceEnabled(false); useAudioStore.getState().stopAudio(); return;
+    }
+    if (!controllerRef.current) {
+      setMicHint('Voice needs Chrome or Edge with microphone access on localhost or HTTPS. You can still type here.');
       return;
     }
-
-    if (isListening) {
-      recognitionRef.current.stop();
-    } else {
-      try {
-        recognitionRef.current.start();
-      } catch {
-        setMicHint('Microphone unavailable. Use keyboard dictation or try again.');
-      }
-    }
+    useJarvisStore.getState().setVoiceEnabled(true);
+    setVoiceConversation(true);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -101,15 +98,17 @@ export const Composer: React.FC<{text:string;setText:(value:string)=>void}> = ({
         <button
           type="button"
           onClick={toggleMic}
-          disabled={!isConnected || isBusy || pendingApprovals.length > 0}
+          disabled={!voiceConversation && (!isConnected || isBusy || pendingApprovals.length > 0)}
           className={`p-3 rounded-full border transition flex items-center justify-center shrink-0 shadow-lg ${
             isListening
               ? 'bg-red-950 border-red-500 text-red-400 animate-pulse'
               : 'bg-obsidian-850 border-cyan-500/40 text-cyan-400 hover:bg-cyan-950/60 active:scale-95 disabled:opacity-35 disabled:pointer-events-none'
           }`}
-          title={isListening ? 'Stop Listening' : 'Tap to Speak'}
+          aria-label={voiceConversation ? 'Stop voice conversation' : 'Start voice conversation'}
+          aria-pressed={voiceConversation}
+          title={voiceConversation ? 'Stop voice conversation' : 'Start voice conversation'}
         >
-          {isListening ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+          {voiceConversation ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
         </button>
 
         {/* Text Input */}
@@ -149,6 +148,13 @@ export const Composer: React.FC<{text:string;setText:(value:string)=>void}> = ({
           </button>
         )}
       </form>
+      {voiceConversation && <div className="voice-conversation-status" role="status">
+        <span className={isListening ? 'voice-dot listening' : 'voice-dot'}/>
+        <span>{isListening ? 'Listening — go ahead' : pendingApprovals.length ? 'Waiting for your approval' : playbackState === 'speaking' ? 'Jarvis is speaking' : playbackState === 'generating' || playbackState === 'buffering' ? 'Preparing voice reply…' : 'Jarvis is thinking…'}</span>
+        <button type="button" onClick={toggleMic}>End conversation</button>
+      </div>}
+      {voiceConversation && liveTranscript && <p className="voice-live-transcript">{liveTranscript}</p>}
+      {voiceConversation && playbackState === 'error' && <p role="status" className="voice-live-transcript">Voice playback failed. Your reply is in chat; use Replay Voice to try again.</p>}
       {micHint && <p role="status" className="max-w-3xl mx-auto mt-2 text-xs text-amber-200">{micHint}</p>}
     </div>
   );

@@ -38,8 +38,11 @@ def test_phone_chat_restores_context_and_playback(tmp_path, monkeypatch):
             ws.send_json({**turn, "text": "mango", "voice": True})
             reply = ws.receive_json()
             assert reply["type"] == "response" and reply["text"] == "mango"
+            assert reply["voice_pending"] is True
             release_voice.set()
-            assert ws.receive_json()["type"] == "audio_state"
+            voice_state = ws.receive_json()
+            assert voice_state["type"] == "audio_state"
+            assert voice_state["session_id"] == "default" and voice_state["message_id"] == reply["message_id"]
             audio = ws.receive_json()
             assert audio["type"] == "reply_audio" and audio["message_id"] == reply["message_id"]
 

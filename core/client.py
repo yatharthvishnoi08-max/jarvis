@@ -1,7 +1,7 @@
 """
 J.A.R.V.I.S. Multi-Provider Intelligent Brain Engine.
 Seamlessly unifies Google Gemini (primary) and OpenRouter (backup)
-with zero-downtime automatic failover, vision perception, and tool-calling support.
+with bounded retries, provider fallback, vision perception, and tool-calling support.
 """
 
 import os
@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import List, Tuple, Any, Optional
 from dotenv import load_dotenv
 from openai import OpenAI
+from core.inference_errors import retryable
 
 logger = logging.getLogger("JARVIS.Brain")
 
@@ -19,6 +20,13 @@ load_dotenv(BASE_DIR / ".env")
 
 class ModelConfigurationError(ValueError):
     pass
+
+
+def request_timeout() -> float:
+    try:
+        return min(60.0, max(5.0, float(os.getenv('LLM_TIMEOUT_SECONDS', '30'))))
+    except (ValueError, TypeError):
+        return 30.0
 
 
 def model_name() -> str:
@@ -53,11 +61,18 @@ class SmartChatCompletions:
         self.default_model = default_model
         self.fallback_models = fallback_models
         self._backup_client = backup_client
-        self.backup_model = backup_model or "meta-llama/llama-3.3-70b-instruct"
+        self.backup_model = backup_model or "meta-llama/llama-3.3-70b-instruct:free"
 
     def create(self, *args, **kwargs) -> Any:
         requested_model = kwargs.get("model", self.default_model)
-        models_to_try = [requested_model] + [m for m in self.fallback_models if m != requested_model]
+        signed_history = any(((tc.get('extra_content') or {}).get('google') or {}).get('thought_signature')
+                             for message in kwargs.get('messages', []) for tc in message.get('tool_calls', []) or []
+                             if isinstance(tc, dict))
+        # Signed Gemini tool chains cannot be blindly replayed against another model.
+        # Retry that model once; unsigned requests can use at most two primary
+        # candidates plus one configured backup (three calls total).
+        models_to_try = ([requested_model, requested_model] if signed_history else
+                         ([requested_model] + [m for m in self.fallback_models if m != requested_model])[:2 if self._backup_client else 3])
 
         last_error = None
         # 1. Try primary models
@@ -67,18 +82,15 @@ class SmartChatCompletions:
                 call_kwargs["model"] = model_name_item
                 return self._primary_client.chat.completions.create(*args, **call_kwargs)
             except Exception as e:
-                err_str = str(e)
-                # Catch 503 (demand spike), 404 (model unavailable), 429 (free tier quota limit)
-                if any(code in err_str for code in ["503", "404", "429", "RESOURCE_EXHAUSTED", "UNAVAILABLE"]):
-                    logger.warning(
-                        f"[Brain Failover]: Model '{model_name_item}' rate-limited or busy: {err_str[:60]}... Trying candidate."
-                    )
+                if retryable(e):
+                    logger.warning("Model request failed (%s, status=%s); trying next bounded attempt.",
+                                   type(e).__name__, getattr(e, 'status_code', None))
                     last_error = e
                     continue
                 raise
 
         # 2. If all primary candidates hit quota/availability limits and backup client is available, failover to backup provider
-        if self._backup_client and self.backup_model:
+        if self._backup_client and self.backup_model and not signed_history:
             try:
                 logger.warning(
                     f"[Brain Failover]: All primary models exhausted. Failing over to backup provider ({self.backup_model})."
@@ -104,7 +116,7 @@ class SmartChatCompletions:
 
                 return self._backup_client.chat.completions.create(*args, **backup_kwargs)
             except Exception as backup_err:
-                logger.error(f"[Brain Backup Error]: {backup_err}")
+                logger.error("Backup request failed (%s, status=%s)", type(backup_err).__name__, getattr(backup_err, "status_code", None))
                 raise last_error or backup_err
 
         if last_error:
@@ -208,7 +220,7 @@ def get_client() -> Tuple[SmartLLMClient, str]:
         model_name_val = os.getenv("MODEL_NAME", "").strip() or "gemini-flash-latest"
         fallback_models = [m for m in GEMINI_DEFAULT_FALLBACKS if m != model_name_val]
 
-        primary_client = OpenAI(api_key=gemini_key, base_url=base_url, timeout=20.0)
+        primary_client = OpenAI(api_key=gemini_key, base_url=base_url, timeout=request_timeout(), max_retries=0)
 
         # Setup backup OpenRouter client if key is available
         backup_client = None
@@ -217,6 +229,7 @@ def get_client() -> Tuple[SmartLLMClient, str]:
             backup_client = OpenAI(
                 api_key=openrouter_key,
                 base_url="https://openrouter.ai/api/v1",
+                timeout=request_timeout(), max_retries=0,
                 default_headers={
                     "HTTP-Referer": "https://github.com/open-jarvis",
                     "X-Title": "Personal-JARVIS"
@@ -247,6 +260,7 @@ def get_client() -> Tuple[SmartLLMClient, str]:
         primary_client = OpenAI(
             api_key=openrouter_key,
             base_url=base_url,
+            timeout=request_timeout(), max_retries=0,
             default_headers={
                 "HTTP-Referer": "https://github.com/open-jarvis",
                 "X-Title": "Personal-JARVIS"
@@ -260,6 +274,6 @@ def get_client() -> Tuple[SmartLLMClient, str]:
         api_key = openrouter_key or gemini_key or "dummy-key"
         base_url = os.getenv("API_BASE_URL", "http://localhost:11434/v1")
         model_name_val = os.getenv("MODEL_NAME", "llama3")
-        raw_client = OpenAI(api_key=api_key, base_url=base_url)
+        raw_client = OpenAI(api_key=api_key, base_url=base_url, timeout=request_timeout(), max_retries=0)
         client = SmartLLMClient(raw_client, default_model=model_name_val, fallback_models=[])
         return client, model_name_val

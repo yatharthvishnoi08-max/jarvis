@@ -731,13 +731,15 @@ async def websocket_endpoint(websocket: WebSocket):
                     # Speech synthesis must not block the next text turn.
                     active_turns.pop(sess.id, None)
                     response = {"type": "response", "session_id": sess.id,
-                                "message_id": reply["id"], "text": response_text}
+                                "message_id": reply["id"], "text": response_text,
+                                "voice_pending": bool(voice and speaker.api_key and not sess.is_cancelled)}
                     if send_text_first:
                         await send_event(response)
 
                     audio_meta = None
                     if voice and speaker.api_key and not sess.is_cancelled:
-                        await send_event({"type": "audio_state", "state": "generating"})
+                        await send_event({"type": "audio_state", "state": "generating",
+                                          "session_id": sess.id, "message_id": reply["id"]})
                         try:
                             audio_meta = await loop.run_in_executor(
                                 None,
