@@ -152,6 +152,11 @@ def verify_foreground_window(expected_keyword: str) -> tuple[bool, str]:
         u.GetClassNameW(fg, cls_buff, 256)
         cls_name = cls_buff.value
 
+        cls_low = cls_name.lower()
+        title_low = title.lower()
+        if cls_low in ("ime", "msctfime ui") or title_low in ("default ime", "msctfime ui"):
+            return False, f"WINDOW_MISMATCH: Foreground window is an IME helper window '{title}'."
+
         w_pid = ctypes.c_ulong()
         u.GetWindowThreadProcessId(fg, ctypes.byref(w_pid))
 
@@ -526,13 +531,21 @@ def _bring_app_window_to_foreground(keyword: str, timeout: float = 3.0) -> bool:
                 u.GetWindowThreadProcessId(hwnd, ctypes.byref(w_pid))
 
                 kw = keyword.lower()
+                cls_low = cls_name.lower()
+                title_low = title.lower()
+                if cls_low in ("ime", "msctfime ui") or title_low in ("default ime", "msctfime ui") or "trayicon" in cls_low or "mediacontrols" in cls_low:
+                    return True
+                if not u.IsWindowVisible(hwnd):
+                    return True
+                rect = ctypes.wintypes.RECT()
+                u.GetWindowRect(hwnd, ctypes.byref(rect))
+                if (rect.right - rect.left) <= 30 or (rect.bottom - rect.top) <= 30:
+                    return True
+
                 if w_pid.value in matching_pids:
-                    # Ignore background helper classes like QTrayIconMessageWindowClass or MediaControls
-                    if "trayicon" not in cls_name.lower() and "mediacontrols" not in cls_name.lower():
-                        hwnds.append(hwnd)
-                elif kw in title.lower() or kw in cls_name.lower():
-                    if "trayicon" not in cls_name.lower():
-                        hwnds.append(hwnd)
+                    hwnds.append(hwnd)
+                elif kw in title_low or kw in cls_low:
+                    hwnds.append(hwnd)
                 return True
 
             u.EnumWindows(WNDENUMPROC(enum_cb), 0)
@@ -555,6 +568,9 @@ def _activate_window_input(target_window: str) -> tuple[bool, str]:
     if not PYAUTOGUI_AVAILABLE:
         return False, "PyAutoGUI is unavailable."
     try:
+        if os.name == "nt":
+            from tools.multimodal_tools import _ensure_input_desktop
+            _ensure_input_desktop()
         import pygetwindow as gw
         window = gw.getActiveWindow()
         if window is None or window.width <= 30 or window.height <= 30:
@@ -635,15 +651,18 @@ def open_app(target: str) -> str:
         expected_window = os.path.splitext(os.path.basename(target))[0]
     _bring_app_window_to_foreground(expected_window, timeout=2.5)
     start = time.time()
+    last_err = ""
     while time.time() - start < 4.0:
         verified, _ = verify_foreground_window(expected_window)
         if verified:
             activated, reason = _activate_window_input(expected_window)
-            if not activated:
-                return f"ERROR: Application opened but input activation failed: {reason}"
-            return f"SUCCESS: Opened application '{clean_target}' and verified visible in foreground."
+            if activated:
+                return f"SUCCESS: Opened application '{clean_target}' and verified visible in foreground."
+            last_err = reason
         time.sleep(0.3)
 
+    if last_err:
+        return f"ERROR: Application opened but input activation failed: {last_err}"
     return f"ERROR: Launched '{clean_target}', but failed to become visible foreground window."
 
 def focus_window(title_keyword: str) -> str:
