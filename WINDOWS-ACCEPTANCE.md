@@ -6,7 +6,7 @@
 - **Host OS**: Windows 11 / Windows 10 (Standard signed-in user session, non-elevated)
 - **Primary Model Provider**: Google Gemini (`gemini-3.5-flash-lite`)
 - **Fallback Models**: Free fallback defaults (`meta-llama/llama-3.3-70b-instruct:free`, `google/gemini-2.0-flash-exp:free`, `nousresearch/hermes-3-llama-3.1-70b:free`). Note: While system defaults use `:free` identifiers, caller-configured overrides are not validated. Billed usage depends on provider account configuration and is not independently metered here.
-- **Security & Secret Hygiene**: Verified zero credentials, owner tokens, or private mailbox/calendar contents committed or exposed in public endpoints.
+- **Security & Secret Hygiene**: Verified zero credentials, owner tokens, or private mailbox/calendar contents committed or exposed in public endpoints. Temporary QA approver daemon terminated and uninstalled.
 
 ---
 
@@ -14,9 +14,9 @@
 
 | Subsystem | Status | Verification Details |
 | :--- | :---: | :--- |
-| **Chat & WebSocket Engine** | **PASS** | Real browser chat communication over authenticated WebSocket. Session persistence with atomic disk writes, valid model history reconstruction after interrupted tool batches, unknown tool outcome marking, correlation-based error tracing (`c9bb401`), and session rollback on disk failure. |
+| **Chat & WebSocket Engine** | **PASS** | Real browser chat communication over authenticated WebSocket. Session persistence with atomic disk writes, valid model history reconstruction after interrupted tool batches, correlation-based error tracing (`c9bb401`), and session rollback on disk failure. |
 | **Desktop Automation (GUI Control)** | **PASS** | Full GUI automation verified without helper math/script shortcuts. IME helper window filter (`87d9295`), window input activation without test bypass (`891d90c`), target-checked typing in <=8-character batches (`7dde947`), LoopGuard full-signature comparison (`18913b6`), and ShellExecuteW/System32 resolution (`750bcb7`). Unit tests prove 0 OS input calls on window mismatch or locked desktop. |
-| **Emergency Stop & Failsafes** | **PASS** | Verified live in browser UI during long keyboard typing: Stop button cancels in-flight typing immediately, suppresses remaining batches and Enter, releases session cleanly, and leaves subsequent chat fully operational. PyAutoGUI `FAILSAFE` intact. |
+| **Emergency Stop & Cooperative Cancellation** | **PASS** | Verified live across both cancellation modes: (1) **Pre-action turn cancellation** (Session `c2a6488e`) cleanly halted before tool dispatch; (2) **Live mid-typing cooperative cancellation** (Session `6cd11571`) interrupted `keyboard_type` at character 329 of 2000, suppressed trailing Enter, returned immediately to `"Ready to talk"`, and left subsequent chat fully functional. |
 | **Planner & Deduplication** | **PASS** | SQLite-backed shared planner (`tools/planner.py`). Reconciled 5 unique dated tasks across multi-document updates, verified idempotent duplicate rejection on re-add ("Already on your list as #..."), and completed test-created task IDs cleanly. |
 | **Memory Engine** | **PASS** | Supermemory-style bounded local keyword recall (BM25), pinned core preferences, context budget cap (5,000 characters), SQLite memory cards with optimistic version checks, undo/revisions, and frontend Memory recall preview. |
 | **Voice Synthesis & Listening** | **PARTIAL** | ElevenLabs TTS audio generation and UI replay controls verified in browser; text-first resilience preserves message text if TTS fails. **Unverified**: Physical microphone audio capture, physical speaker audibility, and voice barge-in remain unverified on this host. |
@@ -54,7 +54,7 @@ Located in `%TEMP%\Jarvis-Acceptance\Cedar-101`:
    - `keyboard_hotkey(target_window="Notepad", keys=["ctrl", "s"])` opened the application Save As dialog.
    - `keyboard_type(press_enter=true)` typed `C:\Users\asha0\AppData\Local\Temp\Jarvis-Acceptance\Cedar-101\action-plan.txt` and submitted.
 4. **Visual Inspection & File Read-Back**:
-   - `capture_screen({})` saved `screen_1795248352.png` (archived to artifacts as `cedar_notepad_saved.png`).
+   - `capture_screen({})` saved `screen_1795248352.png` (archived as `cedar_notepad_saved.png`).
    - `analyze_image` visually verified that the document was populated and tab title updated to `action-plan.txt`.
    - `read_file("C:\Users\asha0\AppData\Local\Temp\Jarvis-Acceptance\Cedar-101\action-plan.txt")` read back the file content from disk with 100% fidelity.
 5. **Exact Visible Chat Response**:
@@ -68,26 +68,40 @@ Located in `%TEMP%\Jarvis-Acceptance\Cedar-101`:
    >    - Saved File Path: C:\Users\asha0\AppData\Local\Temp\Jarvis-Acceptance\Cedar-101\action-plan.txt
    >    - Visual Inspection: Captured screen and verified via vision analysis that Notepad opened a new document tab, populated the source-linked action plan, and successfully saved the file.
    >    - File Read-Back Confirmation: Read back the file content successfully from disk, confirming 100% fidelity.
-6. **Task Cleanup**:
+6. **Artifact Links**:
+   - Full trace & file contents: [cedar_acceptance_evidence.md](file:///C:/Users/asha0/.gemini/antigravity/brain/10f936d3-63ca-470e-8451-1aa2cc7f0aef/cedar_acceptance_evidence.md)
+   - Visual inspection screenshot: [cedar_notepad_saved.png](file:///C:/Users/asha0/.gemini/antigravity/brain/10f936d3-63ca-470e-8451-1aa2cc7f0aef/cedar_notepad_saved.png)
+7. **Task Cleanup**:
    - All 5 test-created planner tasks (#4-#8) completed via `complete_task`; zero residual open test tasks.
    - Temporary QA approver daemon stopped and deleted.
 
 ---
 
-## 4. Emergency Stop Mid-Long-Typing Verification (Session `c2a6488e`)
+## 4. Emergency Stop Live Verification Matrix
 
-1. **User Action / Prompt**:
-   - Prompt requested focusing Notepad, opening a blank tab (Ctrl+N), and typing a 1000-character string with `keyboard_type`.
-2. **Stop Action**:
-   - User clicked "Cancel current task" (Stop) in frontend during typing.
-3. **Outcome**:
-   - Typing aborted immediately at the current <=8-character batch.
-   - Remaining text and trailing Enter suppressed.
-   - Chat displayed: `[EMERGENCY STOP] Operation cancelled by user.`
-4. **Subsequent Usability**:
-   - Follow-up query: `"Status check: are you online and ready?"`
-   - Visible response: `"Online and fully operational, Chairman. All systems, vision capabilities, and computer-use tools are primed and ready for your command."`
-   - Generated voice audio: `aud_a0fc09fd3859`.
+### A. Pre-Action Turn Cancellation (Session `c2a6488e`)
+- User sent typing instruction; Stop clicked during model thinking before tool dispatch.
+- Operation halted immediately without executing any OS actions.
+- Chat rendered: `[EMERGENCY STOP] Operation cancelled by user.`
+- Immediate follow-up query succeeded with 100% responsiveness.
+
+### B. Cooperative Mid-Typing Interruption (Session `6cd11571`)
+- **Prompt**: Focus Notepad, open new blank tab (`Ctrl+N`), and type a 2000-character ASCII test string at `interval=0.05` with `press_enter=true`.
+- **Execution**: `focus_window` and `keyboard_hotkey(Ctrl+N)` completed; `keyboard_type` began active keystroke delivery.
+- **Interruption**: User clicked "Cancel current task" (Stop) ~3 seconds into active typing.
+- **Trace Verification (`/api/sessions/6cd11571`)**:
+  - `keyboard_type` tool result:
+    ```text
+    ERROR: Operation cancelled by user. Stopped after 329 characters; text may be partial.
+    ```
+  - Keystroke count: Exactly **329 / 2000 characters** sent ($0 < 329 < 2000$).
+  - **Enter key suppressed**: Dispatch halted cleanly without firing trailing characters or Enter.
+  - Chat banner: `[EMERGENCY STOP] Operation cancelled by user.`
+- **Post-Stop Usability**:
+  - Follow-up message: `"Status report: are you ready?"`
+  - Assistant reply: `"Chairman, I am online, fully stable, and awaiting your command. The previous test sequence was interrupted by your emergency stop signal at character 329, successfully verifying our cooperative cancellation safeguards..."`
+- **Artifact Evidence**:
+  - Partial typing screenshot: [stop_mid_typing_partial.png](file:///C:/Users/asha0/.gemini/antigravity/brain/10f936d3-63ca-470e-8451-1aa2cc7f0aef/stop_mid_typing_partial.png)
 
 ---
 
