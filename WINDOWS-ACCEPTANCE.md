@@ -18,7 +18,7 @@
 | **Desktop Automation (GUI Control)** | **PASS** | Full GUI automation verified without helper math/script shortcuts. IME helper window filter (`87d9295`), window input activation without test bypass (`891d90c`), target-checked typing in <=8-character batches (`7dde947`), LoopGuard full-signature comparison (`18913b6`), and ShellExecuteW/System32 resolution (`750bcb7`). Unit tests prove 0 OS input calls on window mismatch or locked desktop. |
 | **Emergency Stop & Cooperative Cancellation** | **PASS** | Verified live across both cancellation modes: (1) **Pre-action turn cancellation** (Session `c2a6488e`) cleanly halted before tool dispatch; (2) **Live mid-typing cooperative cancellation** (Session `6cd11571`) interrupted `keyboard_type` at character 329 of 1885, suppressed trailing Enter, returned immediately to `"Ready to talk"`, and follow-up chat succeeded. |
 | **Planner & Deduplication** | **PASS** | SQLite-backed shared planner (`tools/planner.py`). Reconciled 5 unique dated tasks across multi-document updates, verified idempotent duplicate rejection on re-add ("Already on your list as #..."), and completed test-created task IDs cleanly. |
-| **Memory Engine** | **PASS** | Supermemory-style bounded local keyword recall (BM25), pinned core preferences, context budget cap (5,000 characters), SQLite memory cards with optimistic version checks, undo/revisions, and frontend Memory recall preview. |
+| **Memory Engine** | **PASS** | Bounded local keyword recall (BM25), pinned core preferences, context budget cap (5,000 chars), SQLite memory cards with optimistic versioning. End-to-end lifecycle verified via owner UI: card #13 created (v1 violet/Thursday), edited (v2 amber/Tuesday), tested in recall preview (MAVEN-482 matched, unrelated piano query excluded), and archived (fresh session returned "unknown"). Note: Verifies bounded local keyword recall and lifecycle; does not establish semantic/vector retrieval. |
 | **Voice Synthesis & Listening** | **PARTIAL** | ElevenLabs TTS audio generation and UI replay controls verified in browser; text-first resilience preserves message text if TTS fails. **Unverified**: Physical microphone audio capture, physical speaker audibility, and voice barge-in remain unverified on this host. |
 | **Google Workspace Connector** | **BLOCKED** | Read-only Gmail/Calendar client configured in Google Cloud project `nice-proposal-515406-b2`. **Blocked / Paused**: Requires human interactive OAuth consent on Windows host (`~/.config/jarvis/google-desktop.json`). |
 
@@ -137,3 +137,73 @@ Located in `%TEMP%\Jarvis-Acceptance\Cedar-101`:
   - **Full Argument Disclosure**: Interacting with `<details><summary>View details</summary>` expands and renders complete, multi-line formatted JSON parameters without truncation.
   - **Keyboard Accessibility & Focus Trap**: Pressing `Escape` cleanly dismisses the modal sheet and returns focus immediately to the `ACTIVITY` navigation button; panel reopens cleanly on trigger.
   - **Artifact Link**: [activity_panel_verified.png](file:///C:/Users/asha0/.gemini/antigravity/brain/10f936d3-63ca-470e-8451-1aa2cc7f0aef/activity_panel_verified.png)
+
+---
+
+## 7. Real-Model Memory Acceptance Test (End-to-End Lifecycle)
+
+Verified end-to-end through the real owner UI (`http://localhost:8000/`) using only synthetic data. No test approver, no direct API mutation shortcuts, no inspection of personal memories, and no token exposure.
+
+### A. Synthetic Memory Card Lifecycle
+- **Memory Card ID**: `#13`
+- **Category**: `QA_TMP`
+- **Initial Version (`v1`)**:
+  - Text: `Synthetic test MAVEN-482: packaging color is violet and review day is Thursday.`
+  - Pinning: Unpinned (`pinned: 0`, Core preference unchecked)
+  - Version: `v1`
+- **Updated Version (`v2`)**:
+  - Text: `Synthetic test MAVEN-482: packaging color is amber and review day is Tuesday.`
+  - Edit: Performed directly via the frontend Memory editor form. Optimistic version incremented from `v1` to `v2`; `"Undo last change"` control verified.
+- **Archival State (`v3`)**:
+  - Clicked `"Archive"` on Card `#13`.
+  - Frontend confirmation: `"Archived. Jarvis will stop using it. Restore it from Archived & expired."`
+  - Version incremented to `v3` (`archived = 1`, `pinned = 0`, rule text preserved).
+  - Card `#13` retained in database in archived state for audit traceability.
+
+### B. Fresh Chat Conversations & Model Recall Verification
+
+1. **Query 1 (Initial Memory Recall)**:
+   - **Session ID**: `310a3a08`
+   - **User Prompt**: `For the synthetic MAVEN-482 test, what are the packaging color and review day? Use only current saved memory; say unknown if absent.`
+   - **Assistant Response**:
+     > For the synthetic MAVEN-482 test, the packaging color is **violet** and the review day is **Thursday**.
+   - **Result**: Successfully recalled `violet` and `Thursday` without values provided in prompt.
+
+2. **Query 2 (Updated Memory Recall after UI Edit)**:
+   - **Session ID**: `e714202f`
+   - **User Prompt**: `For the synthetic MAVEN-482 test, what are the packaging color and review day? Use only current saved memory; say unknown if absent.`
+   - **Assistant Response**:
+     > For the synthetic MAVEN-482 test, according to the current saved memory:
+     > 
+     > - **Packaging color:** Amber
+     > - **Review day:** Tuesday
+   - **Result**: Cleanly updated; recalled only corrected values (`amber` and `Tuesday`), no stale `violet`/`Thursday`.
+
+3. **Query 3 (Archived Memory Fallback)**:
+   - **Session ID**: `ab61ffee`
+   - **User Prompt**: `For the synthetic MAVEN-482 test, what are the packaging color and review day? Use only current saved memory; say unknown if absent.`
+   - **Assistant Response**:
+     > unknown
+   - **Result**: Immediately excluded archived card from context injection; assistant returned `unknown` without hallucinating or using prior versions.
+
+### C. Memory Test Recall Preview Verification
+
+Tested directly inside the Memory modal's "Test recall" preview tool:
+1. **Targeted Query (`MAVEN-482`)**:
+   - Status: `1 memories selected · 119 / 5000 characters · Local keyword search`
+   - Injected Context:
+     ```text
+     [Relevant memory #13; updated 2026-11-21] Synthetic test MAVEN-482: packaging color is amber and review day is Tuesday.
+     ```
+   - Matches Card `#13` with high relevance.
+2. **Unrelated Query (`Chopin nocturnes piano composer`)**:
+   - Status: `0 memories selected · 29 / 5000 characters · Local keyword search`
+   - Injected Context: `(No relevant saved memories.)`
+   - Confirmed: The unpinned synthetic card was not selected.
+
+### D. Artifact Evidence
+- **Memory Recall Screenshot**: [memory_recall_verified.png](file:///C:/Users/asha0/.gemini/antigravity/brain/10f936d3-63ca-470e-8451-1aa2cc7f0aef/memory_recall_verified.png)  
+  *(Captures Memory modal with Test recall preview for MAVEN-482; owner token and personal memories redacted/not visible).*
+
+> [!NOTE]
+> These verification tests validate bounded local keyword recall (BM25), optimistic editing, and lifecycle suppression in the owner UI. Local BM25 keyword recall is tested and verified; semantic retrieval and full-history compaction are not implemented.
