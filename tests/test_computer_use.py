@@ -164,6 +164,7 @@ def test_open_app_and_focus_window_reject_empty_target():
 def test_open_app_fails_when_foreground_verification_fails():
     with patch("tools.computer_use_tools.is_desktop_available", return_value=(True, "DESKTOP_AVAILABLE")), \
          patch("tools.computer_use_tools._launch_interactive_app", return_value=(True, "Dispatched")), \
+         patch("tools.computer_use_tools.subprocess.Popen"), \
          patch("tools.computer_use_tools._bring_app_window_to_foreground", return_value=True), \
          patch("tools.computer_use_tools.verify_foreground_window", return_value=(False, "WINDOW_MISMATCH")):
 
