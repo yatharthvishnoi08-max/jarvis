@@ -17,17 +17,19 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
 SCREENSHOTS_DIR = BASE_DIR / "memory" / "screenshots"
 
-def _get_vision_client() -> tuple[OpenAI, str]:
-    """Retrieves client configured for Gemini Vision."""
-    gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
-    if not gemini_key:
-        raise ValueError("GEMINI_API_KEY is not configured in .env")
-
-    base_url = os.getenv("API_BASE_URL", "").strip() or "https://generativelanguage.googleapis.com/v1beta/openai/"
-    model = os.getenv("MODEL_NAME", "").strip() or "gemini-3.6-flash"
-
-    client = OpenAI(api_key=gemini_key, base_url=base_url)
-    return client, model
+def _get_vision_client():
+    """Retrieves client configured for Gemini Vision with automatic failover."""
+    try:
+        from core.client import get_client
+        return get_client()
+    except Exception:
+        gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
+        if not gemini_key:
+            raise ValueError("GEMINI_API_KEY is not configured in .env")
+        base_url = os.getenv("API_BASE_URL", "").strip() or "https://generativelanguage.googleapis.com/v1beta/openai/"
+        model = os.getenv("MODEL_NAME", "").strip() or "gemini-3.5-flash-lite"
+        client = OpenAI(api_key=gemini_key, base_url=base_url)
+        return client, model
 
 def analyze_image(image_path: str, prompt: str = "Analyze this image and describe key details, text, and elements.") -> str:
     """
@@ -70,12 +72,25 @@ def analyze_image(image_path: str, prompt: str = "Analyze this image and describ
     except Exception as e:
         return f"ERROR analyzing image with Gemini Vision: {str(e)}"
 
+def _ensure_input_desktop():
+    """Attaches the current Windows thread to the active user desktop station if on Windows."""
+    if os.name == "nt":
+        try:
+            import ctypes
+            user32 = ctypes.windll.user32
+            hDesk = user32.OpenInputDesktop(0, False, 0x1ff)
+            if hDesk:
+                user32.SetThreadDesktop(hDesk)
+        except Exception:
+            pass
+
 def capture_screen(save_path: Optional[str] = None) -> str:
     """
     Captures a high-resolution screenshot of the host's primary monitor display.
     Saves the image to the memory/screenshots folder or a specified custom path.
     """
     try:
+        _ensure_input_desktop()
         SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
         target_path = Path(save_path) if save_path else SCREENSHOTS_DIR / f"screen_{int(time.time())}.png"
         target_path.parent.mkdir(parents=True, exist_ok=True)
@@ -92,6 +107,7 @@ def analyze_screen(prompt: str = "Describe what is currently visible on the scre
     Allows JARVIS to see what the user is working on, diagnose software errors, and provide context-aware visual assistance.
     """
     try:
+        _ensure_input_desktop()
         SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
         temp_path = SCREENSHOTS_DIR / f"live_capture_{int(time.time())}.png"
 

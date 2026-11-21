@@ -61,3 +61,15 @@ def test_approvals_policies():
 
     pol, _ = classify_tool_call("run_elevated_command", {"command": "net start"})
     assert pol == POLICY_CRITICAL
+
+def test_interactive_spawner_functions_defined():
+    from tools.computer_use_tools import _launch_interactive_app, _bring_app_window_to_foreground, COMMON_APP_MAP
+    assert callable(_launch_interactive_app)
+    assert callable(_bring_app_window_to_foreground)
+    assert "telegram" in COMMON_APP_MAP
+    assert "chrome" in COMMON_APP_MAP
+
+def test_open_app_settings_delegation():
+    res = open_app("microphone settings")
+    assert "SUCCESS: Opened Windows Settings" in res
+    assert "privacy-microphone" in res

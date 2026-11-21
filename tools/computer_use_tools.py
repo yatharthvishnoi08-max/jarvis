@@ -198,11 +198,22 @@ def mouse_drag(start_x: int, start_y: int, end_x: int, end_y: int, duration: flo
     except Exception as e:
         return f"ERROR dragging mouse: {str(e)}"
 
+def _prevent_corner_failsafe():
+    """Moves cursor safely away from (0, 0) if sitting in the corner to prevent PyAutoGUI FailSafeException."""
+    if PYAUTOGUI_AVAILABLE:
+        try:
+            pos = pyautogui.position()
+            if pos.x == 0 and pos.y == 0:
+                pyautogui.moveTo(100, 100)
+        except Exception:
+            pass
+
 def keyboard_type(text: str, press_enter: bool = False, interval: float = 0.02) -> str:
     """Types the given text into the currently active or focused input field."""
     if not PYAUTOGUI_AVAILABLE:
         return "ERROR: PyAutoGUI is not available."
     try:
+        _prevent_corner_failsafe()
         # Use pyperclip and hotkey ctrl+v for complex or unicode strings if typing fails
         try:
             pyautogui.typewrite(text, interval=interval)
@@ -232,6 +243,7 @@ def keyboard_hotkey(keys: List[str]) -> str:
     if not PYAUTOGUI_AVAILABLE:
         return "ERROR: PyAutoGUI is not available."
     try:
+        _prevent_corner_failsafe()
         clean_keys = [k.lower().strip() for k in keys if k.strip()]
         if not clean_keys:
             return "ERROR: No keys specified for hotkey."
@@ -248,6 +260,7 @@ def keyboard_press(key: str) -> str:
     if not PYAUTOGUI_AVAILABLE:
         return "ERROR: PyAutoGUI is not available."
     try:
+        _prevent_corner_failsafe()
         clean_key = key.lower().strip()
         pyautogui.press(clean_key)
         return f"SUCCESS: Pressed key '{clean_key}'."
@@ -281,9 +294,146 @@ def open_windows_settings(page: str = "home") -> str:
     except Exception as e:
         return f"ERROR opening Windows Settings: {str(e)}"
 
+def _launch_interactive_app(exe_path: str, args: str = "") -> tuple[bool, str]:
+    """
+    Spawns an application process directly into the active interactive desktop Session 1 (WinSta0\\Default).
+    Uses Windows Task Scheduler one-shot interactive task to break out of isolated subshells,
+    with fallbacks to Shell.Application COM and Win32 CreateProcessW.
+    """
+    if os.name != "nt":
+        try:
+            subprocess.Popen([exe_path] + (args.split() if args else []))
+            return True, f"Launched '{exe_path}'."
+        except Exception as e:
+            return False, str(e)
+
+    # 1. Clean up stale Telegram locks ONLY if Telegram is NOT already running
+    if "telegram" in exe_path.lower():
+        try:
+            is_running = False
+            for p in psutil.process_iter(["name"]):
+                if "telegram" in (p.info["name"] or "").lower():
+                    is_running = True
+                    break
+            if not is_running:
+                tdata = Path(os.path.expandvars(r"%APPDATA%\Telegram Desktop\tdata"))
+                working_lock = tdata / "working"
+                if working_lock.exists():
+                    working_lock.unlink(missing_ok=True)
+                custom_dict = tdata / "dictionaries" / "custom"
+                if custom_dict.exists():
+                    (tdata / "dictionaries").rename(tdata / "dictionaries.bak")
+        except Exception:
+            pass
+
+    # 2. Get short 8.3 path or quote path for task scheduler
+    clean_path = exe_path
+    try:
+        import win32api
+        clean_path = win32api.GetShortPathName(exe_path)
+    except Exception:
+        try:
+            ps_short = f"(New-Object -ComObject Scripting.FileSystemObject).GetFile('{exe_path}').ShortPath"
+            res = subprocess.run(["powershell", "-NoProfile", "-Command", ps_short], capture_output=True, text=True, timeout=3)
+            sp = res.stdout.strip()
+            if sp and os.path.exists(sp):
+                clean_path = sp
+        except Exception:
+            clean_path = f'"{exe_path}"'
+
+    # Task Scheduler Interactive Run (Session 1 WinSta0\\Default)
+    task_cmd = f"{clean_path} {args}".strip() if args else clean_path
+    try:
+        create_res = subprocess.run(
+            ["schtasks", "/create", "/tn", "JarvisAppLauncher", "/tr", task_cmd, "/sc", "once", "/st", "23:59", "/f", "/it"],
+            capture_output=True, text=True, timeout=5
+        )
+        if create_res.returncode == 0:
+            run_res = subprocess.run(
+                ["schtasks", "/run", "/tn", "JarvisAppLauncher"],
+                capture_output=True, text=True, timeout=5
+            )
+            if run_res.returncode == 0:
+                return True, f"Launched interactive process on WinSta0\\Default via Task Scheduler."
+    except Exception:
+        pass
+
+    # 3. Fallback: Shell.Application COM ShellExecute
+    try:
+        working_dir = os.path.dirname(exe_path) if os.path.isfile(exe_path) else ""
+        ps_com = f"""
+$sa = New-Object -ComObject Shell.Application
+$sa.ShellExecute('{exe_path}', '{args}', '{working_dir}', 'open', 1)
+"""
+        subprocess.run(["powershell", "-NoProfile", "-Command", ps_com], capture_output=True, timeout=5)
+        return True, f"Dispatched launch via Shell.Application."
+    except Exception:
+        pass
+
+    # 4. Fallback: cmd /c start
+    try:
+        subprocess.Popen(f'cmd /c start "" "{exe_path}" {args}', cwd=os.path.dirname(exe_path) if os.path.isfile(exe_path) else None, shell=True)
+        return True, f"Dispatched via shell start."
+    except Exception as e:
+        return False, str(e)
+
+def _bring_app_window_to_foreground(keyword: str, timeout: float = 3.0) -> bool:
+    """
+    Attaches to the active input desktop station, locates the window matching
+    the title keyword or window class, and brings it to the foreground (SW_RESTORE).
+    """
+    if os.name != "nt":
+        return False
+
+    try:
+        import ctypes
+        import ctypes.wintypes
+        from tools.multimodal_tools import _ensure_input_desktop
+
+        _ensure_input_desktop()
+        u = ctypes.windll.user32
+        hDesk = u.OpenInputDesktop(0, False, 0x1ff)
+        if hDesk:
+            u.SetThreadDesktop(hDesk)
+
+        SW_RESTORE = 9
+        WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.wintypes.HWND, ctypes.wintypes.LPARAM)
+
+        start = time.time()
+        while time.time() - start < timeout:
+            hwnds = []
+
+            def enum_cb(hwnd, lparam):
+                length = u.GetWindowTextLengthW(hwnd)
+                buff = ctypes.create_unicode_buffer(length + 1)
+                u.GetWindowTextW(hwnd, buff, length + 1)
+                title = buff.value
+
+                cls_buff = ctypes.create_unicode_buffer(256)
+                u.GetClassNameW(hwnd, cls_buff, 256)
+                cls_name = cls_buff.value
+
+                kw = keyword.lower()
+                if kw in title.lower() or kw in cls_name.lower():
+                    hwnds.append(hwnd)
+                return True
+
+            u.EnumWindows(WNDENUMPROC(enum_cb), 0)
+            if hwnds:
+                for hwnd in hwnds:
+                    u.ShowWindow(hwnd, SW_RESTORE)
+                    u.SetForegroundWindow(hwnd)
+                    u.BringWindowToTop(hwnd)
+                return True
+            time.sleep(0.3)
+    except Exception:
+        pass
+    return False
+
 def open_app(target: str) -> str:
     """
-    Opens any Windows application by name, executable, URI, or file path.
+    Opens any Windows application by name, executable, URI, or file path,
+    ensuring it launches interactively on the physical desktop and springs to the foreground.
     Examples: 'telegram', 'notepad', 'calc', 'msedge', 'chrome', 'code', 'explorer', 'cmd', 'settings'.
     """
     clean_target = target.lower().strip()
@@ -293,65 +443,74 @@ def open_app(target: str) -> str:
         page = clean_target.replace("settings", "").replace("setting", "").strip() or "home"
         return open_windows_settings(page)
 
-    # 1. Check known application aliases and paths
+    resolved_path = None
+    args = ""
+
+    # 1. Check known application aliases
     if clean_target in COMMON_APP_MAP:
         for candidate in COMMON_APP_MAP[clean_target]:
-            if os.path.isabs(candidate) and os.path.exists(candidate):
-                try:
-                    subprocess.Popen(f'cmd /c start "" "{candidate}"', cwd=os.path.dirname(candidate), shell=True)
-                    return f"SUCCESS: Launched application '{clean_target}' ({candidate})."
-                except Exception as e:
-                    return f"ERROR launching '{clean_target}' from {candidate}: {str(e)}"
-            elif not os.path.isabs(candidate):
-                try:
-                    subprocess.Popen(f'cmd /c start "" "{candidate}"', shell=True)
-                    return f"SUCCESS: Launched application '{candidate}'."
-                except Exception:
-                    continue
+            expanded = os.path.expandvars(candidate)
+            if os.path.isabs(expanded) and os.path.exists(expanded):
+                resolved_path = expanded
+                break
+            elif not os.path.isabs(expanded):
+                resolved_path = expanded
+                break
 
     # 2. Check if direct target is an existing path or expanded environment path
-    expanded = os.path.expandvars(target)
-    if os.path.exists(expanded):
-        try:
-            cwd = os.path.dirname(expanded) if os.path.isfile(expanded) else None
-            subprocess.Popen(f'cmd /c start "" "{expanded}"', cwd=cwd, shell=True)
-            return f"SUCCESS: Launched application from '{expanded}'."
-        except Exception as e:
-            return f"ERROR launching '{expanded}': {str(e)}"
+    if not resolved_path:
+        expanded = os.path.expandvars(target)
+        if os.path.exists(expanded):
+            resolved_path = expanded
 
-    # 3. Fallback: URI dispatch or standard shell execution
+    # 3. Launch via interactive spawner if path resolved
+    if resolved_path and os.path.isabs(resolved_path):
+        ok, msg = _launch_interactive_app(resolved_path, args)
+        if ok:
+            _bring_app_window_to_foreground(clean_target, timeout=2.5)
+            return f"SUCCESS: Launched application '{clean_target}' interactively ({resolved_path})."
+        return f"ERROR launching '{clean_target}': {msg}"
+
+    # 4. Fallback for URI schemes, system PATH executables, or commands
     try:
         subprocess.Popen(f'cmd /c start "" "{target}"', shell=True)
+        time.sleep(0.5)
+        _bring_app_window_to_foreground(clean_target, timeout=2.0)
         return f"SUCCESS: Dispatched launch for application '{target}'."
     except Exception as e:
         return f"ERROR launching '{target}': {str(e)}"
 
 def focus_window(title_keyword: str) -> str:
     """Brings an application window matching the title keyword to the foreground."""
+    # First attempt: Win32 InputDesktop Window Normalizer
+    if _bring_app_window_to_foreground(title_keyword, timeout=1.5):
+        return f"SUCCESS: Focused window matching '{title_keyword}' on active desktop."
+
     try:
         import pygetwindow as gw
         matches = [w for w in gw.getAllWindows() if title_keyword.lower() in w.title.lower()]
-        if not matches:
-            return f"NOTICE: No active window found matching keyword '{title_keyword}'."
-        target_win = matches[0]
-        if target_win.isMinimized:
-            target_win.restore()
-        target_win.activate()
-        return f"SUCCESS: Focused window '{target_win.title}'."
-    except Exception as e:
-        # Fallback via PowerShell Win32 AppActivate
-        ps_cmd = f"""
+        if matches:
+            target_win = matches[0]
+            if target_win.isMinimized:
+                target_win.restore()
+            target_win.activate()
+            return f"SUCCESS: Focused window '{target_win.title}'."
+    except Exception:
+        pass
+
+    # Fallback via PowerShell Win32 AppActivate
+    ps_cmd = f"""
 $ws = New-Object -ComObject WScript.Shell
 $success = $ws.AppActivate('{title_keyword}')
 if ($success) {{ Write-Output "SUCCESS" }} else {{ Write-Output "NOT_FOUND" }}
 """
-        try:
-            res = subprocess.run(["powershell", "-NoProfile", "-Command", ps_cmd], capture_output=True, text=True, timeout=5)
-            if "SUCCESS" in res.stdout:
-                return f"SUCCESS: Activated application matching '{title_keyword}'."
-            return f"NOTICE: Could not find window matching '{title_keyword}'."
-        except Exception as ex:
-            return f"ERROR focusing window: {str(e)} ({str(ex)})"
+    try:
+        res = subprocess.run(["powershell", "-NoProfile", "-Command", ps_cmd], capture_output=True, text=True, timeout=5)
+        if "SUCCESS" in res.stdout:
+            return f"SUCCESS: Activated application matching '{title_keyword}'."
+        return f"NOTICE: Could not find active window matching '{title_keyword}'."
+    except Exception as ex:
+        return f"ERROR focusing window: {str(ex)}"
 
 def click_screen_element(
     target_description: str,
@@ -364,9 +523,10 @@ def click_screen_element(
     the exact (x, y) coordinates of the requested UI element, and clicks it!
     Example targets: 'Start button', 'Microphone toggle switch', 'Close icon', 'Save button'.
     """
-    from tools.multimodal_tools import _get_vision_client
+    from tools.multimodal_tools import _get_vision_client, _ensure_input_desktop
     from PIL import ImageGrab
 
+    _ensure_input_desktop()
     SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
     temp_img = SCREENSHOTS_DIR / f"grounding_{int(time.time())}.png"
 
