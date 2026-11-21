@@ -101,3 +101,15 @@ test('approval block suppresses wake commands and stop disables microphone compl
   f.controller.stop();last(result('Hey Jarvis hello'));await wait(300);
   assert.equal(f.sent.length,0);assert.equal(f.records.length,2);
 });
+test('acoustic interruption stops speech without an ASR result, rejects tail echo, and retains follow-up words',async()=>{
+ const f=wakeSetup();await wait(200);f.records[0].onresult(result('Hey Jarvis'));
+ f.controller.setPlayback(true,'This is the long story you requested');
+ f.controller.interruptFromMicrophone();assert.equal(f.interrupts,1);assert.equal(f.sent.length,0);
+ f.controller.interruptFromMicrophone();assert.equal(f.interrupts,1);
+ f.records[0].onresult(result('the long story you requested'));assert.equal(f.sent.length,0);
+ f.records[0].onresult(result('Make it shorter'));assert.deepEqual(f.sent,['Make it shorter']);f.controller.stop();
+});
+test('acoustic noise cannot wake standby or bypass a blocked computer task',async()=>{
+ const f=wakeSetup();await wait(200);f.controller.setPlayback(true,'reply');f.controller.interruptFromMicrophone();assert.equal(f.interrupts,0);
+ f.records[0].onresult(result('Hey Jarvis'));f.controller.setBlocked(true);f.controller.interruptFromMicrophone();assert.equal(f.interrupts,1,'wake phrase interrupted, blocked acoustic event did not');f.controller.stop();
+});

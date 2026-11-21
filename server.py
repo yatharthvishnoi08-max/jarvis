@@ -279,7 +279,7 @@ async def login(req: LoginRequest):
 
 @app.get("/api/runtime")
 async def get_runtime(auth: bool = Depends(authenticate_request)):
-    return {"release": "wake-2026.11.21.1", "hostname": socket.gethostname(),
+    return {"release": "wake-2026.11.21.2", "hostname": socket.gethostname(),
             "interface": "browser", "wake_word": "Hey Jarvis"}
 
 @app.get("/api/system/telemetry")

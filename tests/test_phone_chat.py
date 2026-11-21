@@ -64,6 +64,6 @@ def test_runtime_identifies_voice_build_without_credentials(monkeypatch):
     with TestClient(server.app) as app:
         response = app.get('/api/runtime', headers={'Authorization': 'Bearer ' + server.OWNER_TOKEN})
         assert response.status_code == 200
-        assert response.json()['release'] == 'wake-2026.11.21.1'
+        assert response.json()['release'] == 'wake-2026.11.21.2'
         assert set(response.json()) == {'release', 'hostname', 'interface', 'wake_word'}
         assert app.get('/').headers['cache-control'] == 'no-store'

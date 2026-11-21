@@ -23,6 +23,7 @@ export class VoiceConversation {
     interrupt?: () => void;
     awake?: (value: boolean) => void;
     sleep?: () => void;
+    startRecognition?: (recognition: any) => void;
   }, private idleMs = 45000) {}
   start(wakeOnly = false) {
     if (!this.enabled) { this.enabled = true; this.setAwake(!wakeOnly); this.resume(); }
@@ -41,6 +42,12 @@ export class VoiceConversation {
     const changed = this.playing !== value;
     this.playing = value;
     if (changed) { if (value) this.clearIdle(); else this.armIdle(); }
+  }
+  interruptFromMicrophone() {
+    if (!this.enabled || this.blocked || !this.awake || !this.playing) return;
+    this.interrupted = true; this.echoUntil = Date.now() + 1800; this.playing = false;
+    this.callbacks.interrupt?.();
+    this.armIdle();
   }
   private clearIdle() { if (this.idleTimer) clearTimeout(this.idleTimer); this.idleTimer = null; }
   private armIdle() {
@@ -100,7 +107,7 @@ export class VoiceConversation {
         // Interrupt on recognition of new speech, before waiting for its final result.
         // Echo filtering is a text guard, not acoustic echo cancellation.
         if (this.playing && !this.interrupted && (hasWake || stop.test(words) || words.split(/\s+/).length >= 2)) {
-          this.interrupted = true; this.playing = false;
+          this.interrupted = true; this.echoUntil = Date.now() + 1800; this.playing = false;
           this.callbacks.interrupt?.();
         }
         this.armIdle();
@@ -132,7 +139,7 @@ export class VoiceConversation {
         this.callbacks.listening(false);
         this.resume(250);
       };
-      try { recognition.start(); }
+      try { if (this.callbacks.startRecognition) this.callbacks.startRecognition(recognition); else recognition.start(); }
       catch { this.fail('Could not start the microphone automatically. Click Enable microphone once.'); }
     }, delay);
   }

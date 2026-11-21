@@ -7,7 +7,7 @@ import { Send, Mic, MicOff, Square, WifiOff, RotateCw } from 'lucide-react';
 export const Composer: React.FC<{text:string;setText:(value:string)=>void}> = ({text,setText}) => {
   const { sendMessage, orbState, cancelSession, isListening, ws, pendingApprovals, voiceConversation, setVoiceConversation } = useJarvisStore();
   const online = ws?.readyState === WebSocket.OPEN;
-  const { hint: micHint, transcript: liveTranscript, wakeEnabled, setWakeEnabled, retryMicrophone } = useVoiceStore();
+  const { hint: micHint, transcript: liveTranscript, wakeEnabled, setWakeEnabled, retryMicrophone, bargeStatus, inputLevel, unlockInterruption } = useVoiceStore();
   const { connectionError, retryConnection } = useJarvisStore();
   const playbackState = useAudioStore(s => s.playbackState);
   const toggleMic = () => {
@@ -111,6 +111,11 @@ export const Composer: React.FC<{text:string;setText:(value:string)=>void}> = ({
         {micHint && <button type="button" onClick={() => {setWakeEnabled(true);retryMicrophone();}}>Enable microphone</button>}
         <small>Keep this tab open. “Stop listening” returns to standby. Browser speech recognition may use an online service.</small>
       </div>
+      {(voiceConversation || wakeEnabled) && <div className="voice-conversation-status">
+        <span>Interruption: {bargeStatus === 'ready' ? 'ready' : bargeStatus === 'needs-click' ? 'needs one-time audio permission' : bargeStatus === 'starting' ? 'starting' : 'microphone audio unavailable'}</span>
+        <meter aria-label="Microphone level" min="0" max="0.12" value={inputLevel}/>
+        {bargeStatus === 'needs-click' && <button type="button" onClick={unlockInterruption}>Enable interruption</button>}
+      </div>}
       {voiceConversation && liveTranscript && <p className="voice-live-transcript">{liveTranscript}</p>}
       {playbackState === 'error' && <p role="status" className="voice-live-transcript">Browser blocked or failed voice playback. Click Replay Voice once to enable sound.</p>}
       {micHint && <p role="alert" className="voice-live-transcript">{micHint}</p>}

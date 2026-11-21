@@ -2,7 +2,7 @@ import {useEffect, useState} from 'react';
 import {useJarvisStore} from '../stores/useJarvisStore';
 import {useVoiceStore} from '../stores/useVoiceStore';
 import {useAuthStore} from '../stores/useAuthStore';
-export const UI_RELEASE = 'wake-2026.11.21.1';
+export const UI_RELEASE = 'wake-2026.11.21.2';
 export function RuntimeBadge() {
   const listening=useJarvisStore(s=>s.isListening);
   const wake=useVoiceStore(s=>s.wakeEnabled);
